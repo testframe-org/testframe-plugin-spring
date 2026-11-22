@@ -14,7 +14,7 @@
 	<name>testframe-plugin-spring</name>
 	<description>TestFrame execution plugin: runner protocol, test-tour API and headless CLI (read-only)</description>
 	<properties>
-		<java.version>21</java.version>
+		<java.version>25</java.version>
 	</properties>
 	<dependencies>
 		<!-- the assertion language engine (cd ../jsonassert && bun run install:java) -->
