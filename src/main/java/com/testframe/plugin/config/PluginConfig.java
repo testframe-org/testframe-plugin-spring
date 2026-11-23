@@ -28,7 +28,7 @@ public class PluginConfig {
         return new MongoRunner();
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public HttpCaller httpCaller() {
         return new HttpCaller();
     }
@@ -44,8 +44,8 @@ public class PluginConfig {
     }
 
     @Bean
-    public ProjectRuns projectRuns(RunEngine engine) {
-        return new ProjectRuns(engine, ProjectRuns.httpFetcher(), Json.MAPPER);
+    public ProjectRuns projectRuns(RunEngine engine, HttpCaller http) {
+        return new ProjectRuns(engine, ProjectRuns.httpFetcher(http), Json.MAPPER);
     }
 
     /** {@code testframe.projects-dir} (env {@code TESTFRAME_PROJECTS_DIR}): the projects the tour API serves. */

@@ -59,6 +59,14 @@ class RedactionBoundaryTest {
     /** The secret of the private layer; long enough to be substring-matched by the redactor. */
     private static final String SECRET = "Sup3rS3cretApiKey";
     private static final String NDJSON = "application/x-ndjson";
+    /**
+     * Logged once the capture is attached, and required to be present in {@link #stopTarget()}.
+     * Without it the "no secret in any log line" assertion would also pass when nothing is captured
+     * at all — which is the case today, since {@code src/main} makes no logger call of its own. The
+     * probe proves the appender is wired, so the first log statement anyone adds to the plugin that
+     * carries a secret fails this test.
+     */
+    private static final String LOG_PROBE = "redaction-boundary-log-probe";
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
     private static final ExecutorService TARGET_THREADS = Executors.newVirtualThreadPerTaskExecutor();
@@ -75,17 +83,18 @@ class RedactionBoundaryTest {
         logs = new ListAppender<>();
         logs.start();
         root().addAppender(logs);
+        LoggerFactory.getLogger(RedactionBoundaryTest.class).info(LOG_PROBE);
     }
 
-    /** Runs last: detaches the capture, asserts nothing was logged, then frees the target and the project. */
+    /** Runs last: proves the capture saw the probe, asserts no secret was logged, then frees the target and the project. */
     @AfterAll
     static void stopTarget() {
         root().detachAppender(logs);
-        List<String> leaked = logs.list.stream()
-                .map(ILoggingEvent::getFormattedMessage)
-                .filter(message -> message.contains(SECRET))
-                .toList();
+        List<String> captured = logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        List<String> leaked = captured.stream().filter(message -> message.contains(SECRET)).toList();
         try {
+            assertTrue(captured.stream().anyMatch(message -> message.contains(LOG_PROBE)),
+                    "the log capture saw nothing at all: the assertion below would be vacuous");
             assertTrue(leaked.isEmpty(), () -> "the secret reached a log line: " + leaked);
         } finally {
             TARGET.stop(0);

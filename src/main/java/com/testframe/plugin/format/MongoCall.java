@@ -32,8 +32,9 @@ import java.util.regex.Pattern;
  * </pre>
  * Guards: delete/update need a non-empty filter (no accidental wipe of a collection), an update
  * is {@code $}-operators only (or an update pipeline), inserted documents are non-empty and have
- * no top-level {@code $} keys, {@code $out}/{@code $merge} are rejected everywhere, unknown
- * option keys are rejected. Problems name the argument: {@code arg 3 (options): unknown key "foo"}. Values are JSON (MongoDB extended JSON such as
+ * no top-level {@code $} keys, {@code $out}/{@code $merge} and the server-side JavaScript
+ * operators ({@code $where}, {@code $function}, {@code $accumulator}) are rejected everywhere,
+ * unknown option keys are rejected. Problems name the argument: {@code arg 3 (options): unknown key "foo"}. Values are JSON (MongoDB extended JSON such as
  * {"$oid": "..."} is understood).
  */
 public record MongoCall(String subtype, String collection, BsonDocument filter, BsonDocument projection,
@@ -51,6 +52,13 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
     public static final List<String> SUBTYPES = List.of(FIND, AGGREGATION, DELETE_ONE, DELETE_MANY, UPDATE_ONE,
             UPDATE_MANY, INSERT_ONE, INSERT_MANY);
     public static final List<String> WRITE_STAGES = List.of("$out", "$merge");
+    /**
+     * The server-side JavaScript operators, refused everywhere in a call (decision P5,
+     * {@code agents/decisions-taken.md}: "Mongo filters refuse server-side JavaScript"). The plugin
+     * executes whatever a card says, and these hand the card's text to the server's JS engine,
+     * which no other guard here covers.
+     */
+    public static final List<String> JS_OPERATORS = List.of("$where", "$function", "$accumulator");
 
     /** An option key of the subtype's options argument: {@code kind} as for {@link Arg}. */
     public record Option(String name, String kind) {
@@ -107,6 +115,7 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
     private static final Pattern BINDING = Pattern.compile("\\{\\{[^}]+\\}\\}");
     private static final List<String> COLLATION_KEYS = List.of("locale", "caseLevel", "caseFirst", "strength",
             "numericOrdering", "alternate", "maxVariable", "normalization", "backwards");
+    private static final String STRENGTH_PROBLEM = "invalid collation: strength must be 1, 2, 3, 4 or 5";
 
     /**
      * The code rule of a mongo body, or null when acceptable. Empty code is a draft;
@@ -202,9 +211,14 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
                     continue;
                 }
                 BsonValue value = args.get(i);
-                String writeStage = writeStageIn(value);
+                String writeStage = firstKeyIn(value, WRITE_STAGES);
                 if (writeStage != null) {
                     throw new IllegalArgumentException("stage \"" + writeStage + "\" is not allowed in mongo cards");
+                }
+                String jsOperator = firstKeyIn(value, JS_OPERATORS);
+                if (jsOperator != null) {
+                    throw new IllegalArgumentException("operator \"" + jsOperator
+                            + "\" is not allowed in mongo cards (server-side JavaScript is refused)");
                 }
                 // null skips an optional argument (like the shell's find({}, null, {...}))
                 if (!(value.isNull() && (lenient || !arg.required()))) {
@@ -407,6 +421,10 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
         if (!doc.isString("locale")) {
             throw new IllegalArgumentException("collation needs a locale, e.g. {\"locale\": \"pt\"}");
         }
+        // Validated before the driver sees it: getNumber(...).intValue() would silently truncate
+        // 2.5 to 2, and a non-numeric or out-of-range value would come back as the driver's own
+        // message instead of the plugin's.
+        Integer strength = doc.containsKey("strength") ? strengthOf(doc.get("strength")) : null;
         try {
             Collation.Builder b = Collation.builder().locale(doc.getString("locale").getValue());
             if (doc.containsKey("caseLevel")) {
@@ -415,8 +433,8 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
             if (doc.containsKey("caseFirst")) {
                 b.collationCaseFirst(CollationCaseFirst.fromString(doc.getString("caseFirst").getValue()));
             }
-            if (doc.containsKey("strength")) {
-                b.collationStrength(CollationStrength.fromInt(doc.getNumber("strength").intValue()));
+            if (strength != null) {
+                b.collationStrength(CollationStrength.fromInt(strength));
             }
             if (doc.containsKey("numericOrdering")) {
                 b.numericOrdering(doc.getBoolean("numericOrdering").getValue());
@@ -437,6 +455,22 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("invalid collation: " + e.getMessage());
         }
+    }
+
+    /**
+     * The collation {@code strength} (1–5). A non-number, a non-integer or an out-of-range value is
+     * refused with the plugin's own message — the same one the IDE reports, so both sides of the
+     * format agree.
+     */
+    private static int strengthOf(BsonValue value) {
+        if (!value.isNumber()) {
+            throw new IllegalArgumentException(STRENGTH_PROBLEM);
+        }
+        double number = value.asNumber().doubleValue();
+        if (number != Math.rint(number) || number < 1 || number > 5) {
+            throw new IllegalArgumentException(STRENGTH_PROBLEM);
+        }
+        return (int) number;
     }
 
     // ---------------------------------------------------------------- options
@@ -479,21 +513,21 @@ public record MongoCall(String subtype, String collection, BsonDocument filter, 
         return args.size() > index && args.get(index).isDocument() ? args.get(index).asDocument() : null;
     }
 
-    /** The first {@code $out}/{@code $merge} key found anywhere in the arguments, or null. */
-    private static String writeStageIn(BsonValue value) {
+    /** The first key of {@code keys} found anywhere in the arguments, or null. */
+    private static String firstKeyIn(BsonValue value, List<String> keys) {
         if (value.isDocument()) {
             for (Map.Entry<String, BsonValue> e : value.asDocument().entrySet()) {
-                if (WRITE_STAGES.contains(e.getKey())) {
+                if (keys.contains(e.getKey())) {
                     return e.getKey();
                 }
-                String nested = writeStageIn(e.getValue());
+                String nested = firstKeyIn(e.getValue(), keys);
                 if (nested != null) {
                     return nested;
                 }
             }
         } else if (value.isArray()) {
             for (BsonValue item : value.asArray()) {
-                String nested = writeStageIn(item);
+                String nested = firstKeyIn(item, keys);
                 if (nested != null) {
                     return nested;
                 }

@@ -19,6 +19,7 @@ import io.github.jsonassert.JsonataAssertionService;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -143,13 +144,15 @@ public final class Cli {
             return 2;
         }
         MongoRunner mongo = new MongoRunner();
+        HttpCaller http = new HttpCaller();
         try {
-            return execute(invocation, out, err, mongo);
+            return execute(invocation, out, err, mongo, http);
         } catch (RuntimeException e) {
             printErr(err, "run: internal error: " + oneLine(e));
             return 4;
         } finally {
             mongo.close();
+            http.close();
         }
     }
 
@@ -233,16 +236,21 @@ public final class Cli {
 
     // --------------------------------------------------------------- execution
 
-    private int execute(Invocation inv, PrintStream out, PrintStream err, MongoRunner mongo) {
+    private int execute(Invocation inv, PrintStream out, PrintStream err, MongoRunner mongo, HttpCaller http) {
         ProjectRuns runs = new ProjectRuns(
-                new RunEngine(mongo, new HttpCaller(), new JsonataAssertionService(), Json.MAPPER),
-                ProjectRuns.httpFetcher(), Json.MAPPER);
+                new RunEngine(mongo, http, new JsonataAssertionService(), Json.MAPPER),
+                ProjectRuns.httpFetcher(http), Json.MAPPER);
 
         ProjectDir dir;
         try {
             dir = ProjectDir.at(inv.projectDir());
         } catch (IllegalArgumentException e) {
             printErr(err, "run: " + e.getMessage());
+            return 2;
+        }
+        String outputProblem = outputProblem(dir, inv.outputs());
+        if (outputProblem != null) {
+            printErr(err, "run: " + outputProblem);
             return 2;
         }
 
@@ -391,11 +399,57 @@ public final class Cli {
                     Files.writeString(output, Json.MAPPER.writerWithDefaultPrettyPrinter()
                             .writeValueAsString(redactor.tree(jsonReport(project, inv.env(), result, startedAt, finishedAt, completed), Json.MAPPER)));
                 } else {
-                    Files.writeString(output, junitXml(completed, redactor));
+                    Files.writeString(output, junitXml(reports(completed), redactor));
                 }
             } catch (IOException e) {
                 err.println(redactor.apply("run: cannot write " + output + ": " + oneLine(e)));
             }
+        }
+    }
+
+    /**
+     * Why the CLI must refuse one of the {@code --out} targets, or null when every one is
+     * acceptable. A report is never written into the project the run reads (the plugin writes
+     * nothing to a project), and never through a symbolic link: both are compared on real paths,
+     * so a link — or a symlinked directory above the file — pointing into the project is caught.
+     */
+    static String outputProblem(ProjectDir dir, List<Path> outputs) {
+        Path root;
+        try {
+            root = dir.root().toRealPath();
+        } catch (IOException e) {
+            return null;
+        }
+        for (Path output : outputs) {
+            Path abs = output.toAbsolutePath().normalize();
+            if (Files.isSymbolicLink(abs)) {
+                return "--out must not be a symbolic link: " + abs;
+            }
+            Path target = realTarget(abs);
+            if (target.equals(root) || target.startsWith(root)) {
+                return "--out must not write inside the project: " + abs;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The real absolute path {@code abs} would be written to: the real path of its nearest existing
+     * ancestor, plus the names below it (the ancestor may be a directory reached through a
+     * symbolic link). {@code abs} itself is never a symbolic link here.
+     */
+    private static Path realTarget(Path abs) {
+        Path existing = abs;
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+        }
+        if (existing == null) {
+            return abs;
+        }
+        try {
+            return existing.toRealPath().resolve(existing.relativize(abs).toString()).normalize();
+        } catch (IOException e) {
+            return abs;
         }
     }
 
@@ -424,28 +478,34 @@ public final class Cli {
         return report;
     }
 
-    private String junitXml(List<FrameRun> completed, Redactor redactor) {
+    /**
+     * The JUnit report (agents/specs/test-tour.md, "Headless CLI"): one {@code <testsuite>} per
+     * frame, one {@code <testcase>} per card. Cards and results are matched by the var-name the
+     * engine publishes ({@link RunEngine#varNameOf}), which is what a {@code CardResult} carries —
+     * keying one side by the raw card field loses the outcome of a card whose var-name is blank or
+     * untrimmed, and an {@code error} card would be reported as skipped.
+     */
+    static String junitXml(List<FrameReport> frames, Redactor redactor) {
         StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n");
-        for (FrameRun fr : completed) {
-            ProjectRuns.FrameSummary summary = fr.summary();
-            Map<String, Integer> stepOf = stepOf(fr.prepared().steps());
+        for (FrameReport report : frames) {
+            Map<String, Integer> stepOf = stepOf(report.steps());
             Map<String, CardResult> byVar = new LinkedHashMap<>();
-            summary.results().forEach(r -> byVar.put(r.varName(), r));
-            Map<String, Integer> counts = summary.counts();
+            report.results().forEach(r -> byVar.put(r.varName(), r));
+            Map<String, Integer> counts = report.counts();
             int failures = counts.getOrDefault("error", 0);
             int skipped = counts.getOrDefault("skipped", 0) + counts.getOrDefault("notRun", 0);
-            int tests = totalCards(fr.prepared().steps());
-            double time = summary.elapsedMs() / 1000.0;
+            int tests = totalCards(report.steps());
+            double time = report.elapsedMs() / 1000.0;
 
-            xml.append("  <testsuite name=\"").append(attr(summary.frame())).append("\" tests=\"").append(tests)
+            xml.append("  <testsuite name=\"").append(attr(report.frame())).append("\" tests=\"").append(tests)
                     .append("\" failures=\"").append(failures).append("\" skipped=\"").append(skipped)
                     .append("\" time=\"").append(seconds(time)).append("\">\n");
-            for (Step step : fr.prepared().steps()) {
+            for (Step step : report.steps()) {
                 for (Card card : step.cards()) {
-                    String varName = card.varName() == null ? "" : card.varName();
+                    String varName = RunEngine.varNameOf(card);
                     CardResult result = byVar.get(varName);
                     Integer stepNumber = stepOf.get(varName);
-                    xml.append("    <testcase classname=\"").append(attr(summary.frame()))
+                    xml.append("    <testcase classname=\"").append(attr(report.frame()))
                             .append(".step-").append(stepNumber == null ? step.number() : stepNumber)
                             .append("\" name=\"").append(attr(varName))
                             .append("\" time=\"").append(seconds(result == null ? 0 : result.elapsedMs() / 1000.0))
@@ -465,13 +525,23 @@ public final class Cli {
         return xml.append("</testsuites>\n").toString();
     }
 
+    /** One frame of the JUnit report. */
+    record FrameReport(String frame, List<Step> steps, List<CardResult> results, Map<String, Integer> counts,
+                       long elapsedMs) {
+    }
+
+    private static List<FrameReport> reports(List<FrameRun> completed) {
+        return completed.stream()
+                .map(fr -> new FrameReport(fr.summary().frame(), fr.prepared().steps(), fr.summary().results(),
+                        fr.summary().counts(), fr.summary().elapsedMs()))
+                .toList();
+    }
+
     private static Map<String, Integer> stepOf(List<Step> steps) {
         Map<String, Integer> map = new LinkedHashMap<>();
         for (Step step : steps) {
             for (Card card : step.cards()) {
-                if (card.varName() != null) {
-                    map.put(card.varName(), step.number());
-                }
+                map.put(RunEngine.varNameOf(card), step.number());
             }
         }
         return map;
@@ -505,11 +575,49 @@ public final class Cli {
     }
 
     private static String attr(String text) {
-        return escape(text).replace("\"", "&quot;").replace("'", "&apos;");
+        return escape(text, true);
     }
 
     private static String escape(String text) {
-        return text == null ? "" : text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return escape(text, false);
+    }
+
+    /**
+     * Escapes XML text and drops every character XML 1.0 cannot hold: a control character or a
+     * lone surrogate picked up from a response body would otherwise make the whole report
+     * unparsable. In an attribute, {@code \t}, {@code \n} and {@code \r} become numeric references
+     * because a parser normalises them to spaces there, which would silently change the evidence.
+     */
+    private static String escape(String text, boolean attribute) {
+        if (text == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        text.codePoints().forEach(codePoint -> {
+            if (!legalXml(codePoint)) {
+                return;
+            }
+            switch (codePoint) {
+                case '&' -> out.append("&amp;");
+                case '<' -> out.append("&lt;");
+                case '>' -> out.append("&gt;");
+                case '"' -> out.append(attribute ? "&quot;" : "\"");
+                case '\'' -> out.append(attribute ? "&apos;" : "'");
+                case '\t' -> out.append(attribute ? "&#9;" : "\t");
+                case '\n' -> out.append(attribute ? "&#10;" : "\n");
+                case '\r' -> out.append("&#13;"); // a parser normalises a literal CR and loses it
+                default -> out.appendCodePoint(codePoint);
+            }
+        });
+        return out.toString();
+    }
+
+    /** XML 1.0: {@code #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]}. */
+    private static boolean legalXml(int codePoint) {
+        return codePoint == 0x9 || codePoint == 0xA || codePoint == 0xD
+                || (codePoint >= 0x20 && codePoint <= 0xD7FF)
+                || (codePoint >= 0xE000 && codePoint <= 0xFFFD)
+                || (codePoint >= 0x10000 && codePoint <= 0x10FFFF);
     }
 
     private static String seconds(double seconds) {

@@ -16,12 +16,18 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Request gate of every request but the tour assets (see {@link #shouldNotFilter}): 503 while shutting down, 401 without the configured
- * {@code Authorization: Bearer {token}}, 413 for bodies over {@link Limits#MAX_REQUEST_BYTES}
+ * {@code Authorization: Bearer {token}}, 403 for a {@code Host} that is not the plugin's own
+ * loopback name when no token is configured, 413 for bodies over {@link Limits#MAX_REQUEST_BYTES}
  * (declared length, or counted while reading). The plugin sends no CORS headers.
  */
 @Component
@@ -34,11 +40,78 @@ public class ApiFilter extends OncePerRequestFilter implements ApplicationListen
         }
     }
 
+    /**
+     * The {@code Host} names a request may carry when no token is configured. Loopback binding
+     * alone does not keep a browser out: a page that makes its own domain resolve to 127.0.0.1
+     * (DNS rebinding) sends requests that look same-origin to it and reach this port. The
+     * {@code Host} header is the only thing that tells them apart, so it must name the loopback
+     * interface literally — no name is resolved to decide, since a name that resolves to the
+     * loopback is exactly what rebinding uses.
+     */
+    private static final Set<String> LOOPBACK_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]", "::1");
+
     private final byte[] token;
+    private final Set<String> allowedHosts;
     private volatile boolean closing;
 
-    public ApiFilter(@Value("${testframe.token:}") String token) {
+    public ApiFilter(@Value("${testframe.token:}") String token, @Value("${server.address:}") String address) {
         this.token = token == null || token.isBlank() ? null : token.getBytes(StandardCharsets.UTF_8);
+        this.allowedHosts = allowedHosts(address);
+    }
+
+    /** The loopback literals, plus {@code server.address} when it is itself a loopback literal. */
+    static Set<String> allowedHosts(String address) {
+        Set<String> hosts = new LinkedHashSet<>(LOOPBACK_HOSTS);
+        if (isLoopbackLiteral(address)) {
+            hosts.add(address.trim().toLowerCase(Locale.ROOT));
+        }
+        return Set.copyOf(hosts);
+    }
+
+    /**
+     * Whether {@code address} is an IP literal of the loopback range. A hostname is refused without
+     * being resolved: only a literal is guaranteed not to reach the resolver.
+     */
+    private static boolean isLoopbackLiteral(String address) {
+        if (address == null || address.isBlank()) {
+            return false;
+        }
+        String value = address.trim();
+        if (!value.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}") && !value.contains(":")) {
+            return false;
+        }
+        try {
+            return InetAddress.getByName(value).isLoopbackAddress();
+        } catch (UnknownHostException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The host of a {@code Host} header, lower-case and without its port; null when the header does
+     * not name one. Only the two shapes a valid header has are accepted ({@code host[:port]} and
+     * {@code [ipv6][:port]}), so a look-alike such as {@code [::1].attacker.example} is not a
+     * loopback host.
+     */
+    static String hostOf(String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        String value = header.trim();
+        if (value.startsWith("[")) { // an IPv6 literal: [::1] or [::1]:18080
+            int end = value.indexOf(']');
+            String rest = end < 0 ? null : value.substring(end + 1);
+            if (rest == null || !(rest.isEmpty() || rest.matches(":[0-9]+"))) {
+                return null;
+            }
+            return value.substring(0, end + 1).toLowerCase(Locale.ROOT);
+        }
+        int colon = value.indexOf(':');
+        if (colon >= 0 && !value.substring(colon + 1).matches("[0-9]+")) {
+            return null;
+        }
+        String host = colon < 0 ? value : value.substring(0, colon);
+        return host.isEmpty() ? null : host.toLowerCase(Locale.ROOT);
     }
 
     @Override
@@ -76,9 +149,20 @@ public class ApiFilter extends OncePerRequestFilter implements ApplicationListen
             ApiResponses.error(response, 503, "the plugin is shutting down", null, Redactor.structural());
             return;
         }
-        if (token != null && !authorized(request.getHeader("Authorization"))) {
-            ApiResponses.error(response, 401, "missing or invalid Authorization: Bearer token", null, Redactor.structural());
-            return;
+        if (token != null) {
+            if (!authorized(request.getHeader("Authorization"))) {
+                ApiResponses.error(response, 401, "missing or invalid Authorization: Bearer token", null,
+                        Redactor.structural());
+                return;
+            }
+        } else {
+            String host = hostOf(request.getHeader("Host"));
+            if (host == null || !allowedHosts.contains(host)) {
+                // the refused Host is not echoed back: it is caller-controlled text
+                ApiResponses.error(response, 403,
+                        "the plugin only answers requests to its own loopback address", null, Redactor.structural());
+                return;
+            }
         }
         if (request.getContentLengthLong() > Limits.MAX_REQUEST_BYTES) {
             ApiResponses.error(response, 413, "request body larger than " + Limits.MAX_REQUEST_BYTES + " bytes", null,

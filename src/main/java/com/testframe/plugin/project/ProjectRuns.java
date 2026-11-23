@@ -1,6 +1,7 @@
 package com.testframe.plugin.project;
 
 import com.testframe.plugin.PluginInfo;
+import com.testframe.plugin.engine.HttpCaller;
 import com.testframe.plugin.engine.OpenApiSpec;
 import com.testframe.plugin.engine.Redactor;
 import com.testframe.plugin.engine.RunControl;
@@ -21,11 +22,6 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -439,28 +435,12 @@ public class ProjectRuns {
         }
     }
 
-    /** The default fetcher: GET with the source's headers, 10 s timeout, 2xx required. */
-    public static SpecFetcher httpFetcher() {
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-        return (url, headers) -> {
-            try {
-                HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
-                        .timeout(Duration.ofSeconds(10)).header("Accept", "application/json").GET();
-                headers.forEach(builder::header);
-                HttpResponse<String> res = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-                if (res.statusCode() < 200 || res.statusCode() >= 300) {
-                    throw new IOException("HTTP " + res.statusCode());
-                }
-                return res.body();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("interrupted", e);
-            } catch (IllegalArgumentException e) {
-                throw new IOException(e.getMessage(), e);
-            }
-        };
+    /**
+     * The default fetcher: an OpenAPI document read through {@link HttpCaller}, which caps the
+     * body at {@link com.testframe.plugin.engine.Limits#MAX_RESPONSE_BODY_BYTES} and follows
+     * redirects to the same host only (the source's headers can hold credentials).
+     */
+    public static SpecFetcher httpFetcher(HttpCaller http) {
+        return http::fetchDocument;
     }
 }

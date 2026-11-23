@@ -23,21 +23,32 @@ import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
 
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Executes a mongo card's call ({@link MongoCall}: find, aggregation, deleteOne/Many,
  * updateOne/Many, insertOne/Many) with the MongoDB sync driver against the database named in the
- * source URI. One client per (URI, card timeout), created on first use: server selection and
- * connect stop at the card timeout. {@link MongoCall} validates the call (guards included)
- * before anything connects. The plugin has no Mongo configuration of its own.
+ * source URI. One client per (URI, card timeout), created on first use and evicted past
+ * {@link #MAX_CLIENTS}: server selection and connect stop at the card timeout. {@link MongoCall}
+ * validates the call (guards included) before anything connects. The plugin has no Mongo
+ * configuration of its own.
  */
 public class MongoRunner implements AutoCloseable {
 
     public static final int MAX_DOCUMENTS = Limits.MAX_MONGO_DOCUMENTS;
+
+    /**
+     * How many clients are cached at once. A run request names its own sources, so the set of
+     * URIs the plugin sees is caller-controlled: without a bound each distinct URI would leave a
+     * client (a connection pool and its monitor threads) alive until shutdown. The least recently
+     * used client is closed on eviction; an operation still running on an evicted client fails
+     * that card, which needs more than {@code MAX_CLIENTS} distinct URIs in one run.
+     */
+    static final int MAX_CLIENTS = 8;
 
     private static final JsonWriterSettings JSON = JsonWriterSettings.builder()
             .outputMode(JsonMode.RELAXED)
@@ -47,7 +58,8 @@ public class MongoRunner implements AutoCloseable {
     private record ClientKey(String uri, long timeoutMs) {
     }
 
-    private final Map<ClientKey, MongoClient> clients = new ConcurrentHashMap<>();
+    /** Access-ordered, guarded by {@code synchronized (clients)}; evicted clients are closed outside it. */
+    private final Map<ClientKey, MongoClient> clients = new LinkedHashMap<>(16, 0.75f, true);
 
     /** The database a URI names; IllegalArgumentException when it names none. */
     public static String databaseOf(String uri) {
@@ -61,15 +73,46 @@ public class MongoRunner implements AutoCloseable {
     /** Result as a JSON string: {"operation" (the subtype), "collection", "count", "result"}. */
     public String run(String uri, MongoCall call, long timeoutMs) {
         String database = databaseOf(uri);
-        MongoClient client = clients.computeIfAbsent(new ClientKey(uri, timeoutMs), key -> MongoClients.create(
-                MongoClientSettings.builder()
-                        .applyConnectionString(new ConnectionString(key.uri()))
-                        .applyToClusterSettings(b -> b.serverSelectionTimeout(key.timeoutMs(), TimeUnit.MILLISECONDS))
-                        .applyToSocketSettings(b -> b.connectTimeout((int) key.timeoutMs(), TimeUnit.MILLISECONDS)
-                                .readTimeout((int) key.timeoutMs() + 1000, TimeUnit.MILLISECONDS))
-                        .build()));
-        MongoCollection<Document> collection = client.getDatabase(database).getCollection(call.collection());
+        MongoCollection<Document> collection = client(uri, timeoutMs).getDatabase(database).getCollection(call.collection());
         return envelope(call, execute(collection, call, timeoutMs));
+    }
+
+    /** The cached client of (uri, timeoutMs), created on first use; the cache stays bounded. */
+    private MongoClient client(String uri, long timeoutMs) {
+        ClientKey key = new ClientKey(uri, timeoutMs);
+        List<MongoClient> evicted = new ArrayList<>();
+        MongoClient client;
+        synchronized (clients) {
+            client = clients.get(key);
+            if (client == null) {
+                client = create(key);
+                clients.put(key, client);
+                while (clients.size() > MAX_CLIENTS) {
+                    Iterator<Map.Entry<ClientKey, MongoClient>> it = clients.entrySet().iterator();
+                    Map.Entry<ClientKey, MongoClient> eldest = it.next();
+                    evicted.add(eldest.getValue());
+                    it.remove();
+                }
+            }
+        }
+        evicted.forEach(MongoRunner::closeQuietly);
+        return client;
+    }
+
+    private static MongoClient create(ClientKey key) {
+        return MongoClients.create(MongoClientSettings.builder()
+                .applyConnectionString(new ConnectionString(key.uri()))
+                .applyToClusterSettings(b -> b.serverSelectionTimeout(key.timeoutMs(), TimeUnit.MILLISECONDS))
+                .applyToSocketSettings(b -> b.connectTimeout((int) key.timeoutMs(), TimeUnit.MILLISECONDS)
+                        .readTimeout((int) key.timeoutMs() + 1000, TimeUnit.MILLISECONDS))
+                .build());
+    }
+
+    /** How many clients are cached (the bound the eviction keeps). */
+    int clientCount() {
+        synchronized (clients) {
+            return clients.size();
+        }
     }
 
     /**
@@ -264,13 +307,19 @@ public class MongoRunner implements AutoCloseable {
 
     @Override
     public void close() {
-        clients.values().forEach(client -> {
-            try {
-                client.close();
-            } catch (RuntimeException ignored) {
-                // shutting down: nothing else to do
-            }
-        });
-        clients.clear();
+        List<MongoClient> all;
+        synchronized (clients) {
+            all = List.copyOf(clients.values());
+            clients.clear();
+        }
+        all.forEach(MongoRunner::closeQuietly);
+    }
+
+    private static void closeQuietly(MongoClient client) {
+        try {
+            client.close();
+        } catch (RuntimeException ignored) {
+            // shutting down: nothing else to do
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.testframe.plugin.format;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -20,6 +21,11 @@ import java.util.stream.Stream;
  * {@code testframe/} folder, symbolic links are never followed, and only {@code .md} files under
  * {@code frames/} and the {@code sources*.yaml} layers at the {@code testframe/} root are read.
  * Cards' {@code .private.md} notes and {@code .testframebuild/} are never read.
+ *
+ * <p>Containment is decided on <b>real</b> paths, not on the path text: the project root is
+ * resolved once with {@link Path#toRealPath()} and every folder and file is compared against that
+ * real root, so a symbolic link on the project folder, on {@code testframe/}, on {@code frames/},
+ * on a frame folder or on any directory above the leaf cannot move a read outside the project.
  */
 public final class ProjectDir {
 
@@ -37,19 +43,28 @@ public final class ProjectDir {
 
     private final Path root;
     private final Path testframe;
+    private final Path realTestframe;
 
-    private ProjectDir(Path root) {
+    private ProjectDir(Path root, Path realRoot) {
         this.root = root;
         this.testframe = root.resolve(TESTFRAME);
+        this.realTestframe = realRoot.resolve(TESTFRAME);
     }
 
-    /** The project at {@code dir}; IllegalArgumentException when it holds no {@code testframe/} folder. */
+    /**
+     * The project at {@code dir}; IllegalArgumentException when it holds no {@code testframe/}
+     * folder or when the folder cannot be resolved to its real path.
+     */
     public static ProjectDir at(Path dir) {
         Path abs = dir.toAbsolutePath().normalize();
         if (!Files.isDirectory(abs.resolve(TESTFRAME), LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException(dir + " is not a project (no " + TESTFRAME + "/ folder)");
         }
-        return new ProjectDir(abs);
+        try {
+            return new ProjectDir(abs, abs.toRealPath());
+        } catch (IOException e) {
+            throw new IllegalArgumentException(dir + " cannot be resolved: " + e.getClass().getSimpleName(), e);
+        }
     }
 
     public Path root() {
@@ -81,7 +96,7 @@ public final class ProjectDir {
     }
 
     public boolean hasFrame(String frame) {
-        return isFrameName(frame) && Files.isDirectory(frameDir(frame), LinkOption.NOFOLLOW_LINKS);
+        return realFrameDir(frame) != null;
     }
 
     /**
@@ -89,9 +104,9 @@ public final class ProjectDir {
      * without {@code .private.md} notes. Unreadable entries are added to {@code errors}.
      */
     public List<ProjectFile> frameFiles(String frame, List<String> errors) throws IOException {
-        Path dir = frameDir(frame);
         List<ProjectFile> files = new ArrayList<>();
-        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+        Path dir = realFrameDir(frame);
+        if (dir == null) {
             return files;
         }
         List<Path> paths;
@@ -134,26 +149,54 @@ public final class ProjectDir {
         return layers;
     }
 
-    private Path frameDir(String frame) {
+    /**
+     * The real folder of {@code frames/{frame}}, or null: the name must be kebab-case, the folder
+     * must be a real directory (never a symbolic link), and its real path must stay inside this
+     * project's real {@code frames/} — a symbolic link on the frame folder or on any directory
+     * above it cannot move the read outside the project.
+     */
+    private Path realFrameDir(String frame) {
         if (!isFrameName(frame)) {
-            throw new IllegalArgumentException("invalid frame name: " + frame);
+            return null;
         }
         Path dir = testframe.resolve(FRAMES).resolve(frame).normalize();
-        if (!dir.startsWith(testframe.resolve(FRAMES))) {
-            throw new IllegalArgumentException("path outside the project: " + frame);
+        if (!dir.startsWith(testframe.resolve(FRAMES)) || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
         }
-        return dir;
+        return realInside(dir, realTestframe.resolve(FRAMES));
     }
 
+    /**
+     * The real path of {@code path} when it stays inside {@code realBase}; null otherwise (a
+     * symbolic link anywhere on the path resolves to its target, so an escape is caught here).
+     */
+    private static Path realInside(Path path, Path realBase) {
+        try {
+            Path real = path.toRealPath();
+            return real.startsWith(realBase) ? real : null;
+        } catch (IOException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Reads one already-listed file: a symbolic link is never followed, the real path must stay
+     * inside {@code testframe/}, and at most {@link #MAX_FILE_BYTES} are read (the stream is cut,
+     * so a file that grows between listing and reading cannot be over-read).
+     */
     private String read(Path file, String rel, List<String> errors) throws IOException {
-        if (!file.normalize().startsWith(testframe)) {
+        if (Files.isSymbolicLink(file) || realInside(file, realTestframe) == null) {
             errors.add(rel + ": outside the project");
             return null;
         }
-        if (Files.size(file) > MAX_FILE_BYTES) {
+        byte[] bytes;
+        try (InputStream in = Files.newInputStream(file)) {
+            bytes = in.readNBytes((int) MAX_FILE_BYTES + 1);
+        }
+        if (bytes.length > MAX_FILE_BYTES) {
             errors.add(rel + ": larger than " + MAX_FILE_BYTES + " bytes, not read");
             return null;
         }
-        return Files.readString(file, StandardCharsets.UTF_8);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

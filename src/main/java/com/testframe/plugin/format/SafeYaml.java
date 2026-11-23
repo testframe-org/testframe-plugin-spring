@@ -28,8 +28,9 @@ import java.util.regex.Pattern;
 /**
  * The restricted YAML loader of the {@code sources*.yaml} layers (agents/specs/project-format.md,
  * "Sources"): maps, lists and scalars only, typed with the YAML 1.2 core schema; anchors,
- * aliases, explicit tags, duplicate keys, complex keys and multiple documents are errors. It
- * works on the parser's event stream, so no object is ever constructed from the document.
+ * aliases, explicit tags, duplicate keys, complex keys, nesting deeper than {@link #MAX_DEPTH}
+ * and multiple documents are errors. It works on the parser's event stream, so no object is ever
+ * constructed from the document.
  */
 public final class SafeYaml {
 
@@ -72,6 +73,13 @@ public final class SafeYaml {
     private static final Pattern FLOAT = Pattern.compile(
             "[-+]?(\\.[0-9]+|[0-9]+(\\.[0-9]*)?)([eE][-+]?[0-9]+)?|[-+]?\\.(inf|Inf|INF)|\\.nan|\\.NaN|\\.NAN");
 
+    /**
+     * How deep a document may nest. SnakeYAML's own {@code nestingDepthLimit} is only enforced while
+     * it composes objects, which this loader never does, so the depth is counted here: without it a
+     * file of nested mappings inside the size cap would overflow the stack of the thread reading it.
+     */
+    static final int MAX_DEPTH = 20;
+
     private SafeYaml() {
     }
 
@@ -80,7 +88,7 @@ public final class SafeYaml {
         LoaderOptions options = new LoaderOptions();
         options.setAllowDuplicateKeys(false);
         options.setMaxAliasesForCollections(0);
-        options.setNestingDepthLimit(20);
+        options.setNestingDepthLimit(MAX_DEPTH);
         options.setCodePointLimit((int) ProjectDir.MAX_FILE_BYTES);
         Yaml yaml = new Yaml(options);
         List<Event> events = new ArrayList<>();
@@ -101,10 +109,13 @@ public final class SafeYaml {
         if (!it.hasNext()) {
             return new Mapping(new LinkedHashMap<>());
         }
-        return read(it.next(), it);
+        return read(it.next(), it, 0);
     }
 
-    private static Value read(Event event, Iterator<Event> it) {
+    private static Value read(Event event, Iterator<Event> it, int depth) {
+        if (depth > MAX_DEPTH) {
+            throw new YamlProblem(at(event) + "nesting deeper than " + MAX_DEPTH + " is not allowed");
+        }
         if (event instanceof AliasEvent) {
             throw new YamlProblem(at(event) + "aliases are not allowed");
         }
@@ -130,7 +141,7 @@ public final class SafeYaml {
                 if (!(key instanceof ScalarEvent keyScalar)) {
                     throw new YamlProblem(at(key) + "keys must be plain names");
                 }
-                Value keyValue = read(key, it);
+                Value keyValue = read(key, it, depth);
                 String name = keyScalar.getValue();
                 if (keyValue instanceof Scalar s && s.isNull() && name.isEmpty()) {
                     throw new YamlProblem(at(key) + "empty key");
@@ -138,7 +149,7 @@ public final class SafeYaml {
                 if (entries.containsKey(name)) {
                     throw new YamlProblem(at(key) + "duplicate key \"" + name + "\"");
                 }
-                entries.put(name, read(next(it), it));
+                entries.put(name, read(next(it), it, depth + 1));
             }
         }
         if (event instanceof SequenceStartEvent) {
@@ -148,7 +159,7 @@ public final class SafeYaml {
                 if (item instanceof SequenceEndEvent) {
                     return new Sequence(items);
                 }
-                items.add(read(item, it));
+                items.add(read(item, it, depth + 1));
             }
         }
         throw new YamlProblem(at(event) + "unexpected YAML content");

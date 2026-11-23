@@ -17,13 +17,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * The single redactor every outgoing string passes through (agents/specs/runner-protocol.md,
  * "Security"; agents/specs/test-tour.md, "Redaction"): responses, NDJSON events, error messages and log
  * lines. Each secret is replaced by {@code ***}, matching its raw value, its JSON-escaped form and
- * its URL-encoded forms, longest first; secrets shorter than 4 characters are not
+ * its URL-encoded forms — Java's form encoding and the browser's {@code encodeURIComponent}, each
+ * in upper and lower-case hex — longest first; secrets shorter than 4 characters are not
  * substring-matched. Structural rules apply whatever the secrets: the user-info of any URI is
  * written {@code ***@}, and the values of the headers {@code authorization},
  * {@code proxy-authorization}, {@code cookie} and {@code set-cookie} (any object key with that
@@ -54,9 +56,16 @@ public final class Redactor {
             }
             forms.add(secret);
             forms.add(jsonEscaped(secret));
+            // Both percent-encodings a secret can come back in: Java's form encoding (space as
+            // '+', and '!'*()~' escaped) and the browser's encodeURIComponent (space as %20, those
+            // left alone). Each is added in upper and lower case hex, since URLEncoder and
+            // encodeURIComponent emit upper case but a URL that travelled through another tool
+            // often does not.
             String form = URLEncoder.encode(secret, StandardCharsets.UTF_8);
-            forms.add(form);
-            forms.add(form.replace("+", "%20"));
+            for (String encoded : List.of(form, form.replace("+", "%20"), encodeURIComponent(secret))) {
+                forms.add(encoded);
+                forms.add(lowerHex(encoded));
+            }
         }
         List<String> sorted = new ArrayList<>(forms);
         sorted.removeIf(s -> s.length() < MIN_SUBSTRING);
@@ -121,6 +130,36 @@ public final class Redactor {
             return out;
         }
         return node;
+    }
+
+    private static final Pattern PERCENT = Pattern.compile("%[0-9A-Fa-f]{2}");
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+    /** What the browser's {@code encodeURIComponent} leaves alone (RFC 3986 unreserved plus {@code !'()*}). */
+    private static final String JS_UNRESERVED =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()";
+
+    /** {@code text} with every percent-escape in lower-case hex ({@code %2F} → {@code %2f}). */
+    private static String lowerHex(String text) {
+        return PERCENT.matcher(text).replaceAll(m -> Matcher.quoteReplacement(m.group().toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * The JavaScript {@code encodeURIComponent} of {@code text}. It is not what
+     * {@link URLEncoder} produces: that is form encoding, which escapes {@code !'()*~} and turns a
+     * space into {@code +}, so a secret containing one of them arrives from a browser in a form no
+     * Java encoder generates.
+     */
+    private static String encodeURIComponent(String text) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : text.getBytes(StandardCharsets.UTF_8)) {
+            int value = b & 0xFF;
+            if (JS_UNRESERVED.indexOf((char) value) >= 0) {
+                out.append((char) value);
+            } else {
+                out.append('%').append(HEX[value >>> 4]).append(HEX[value & 0xF]);
+            }
+        }
+        return out.toString();
     }
 
     private static String jsonEscaped(String text) {

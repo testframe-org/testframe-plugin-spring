@@ -15,7 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The forms one secret is matched in (agents/specs/runner-protocol.md, "Security"): raw, JSON-escaped and
- * URL-encoded, longest first, with secrets shorter than {@link Redactor#MIN_SUBSTRING} characters
+ * URL-encoded (Java's form encoding and the browser's {@code encodeURIComponent}, each in upper and
+ * lower-case hex), longest first, with secrets shorter than {@link Redactor#MIN_SUBSTRING} characters
  * left out of the substring match. The structural rules (URI user-info, the four sensitive header
  * names) hold whatever the secret list is. What actually leaves the plugin is covered end to end
  * by {@code api/RedactionBoundaryTest}.
@@ -42,6 +43,28 @@ class RedactorTest {
         List<String> secrets = List.of("my secret token");
         assertEquals("?q=***&x=1", apply(secrets, "?q=my+secret+token&x=1"));
         assertEquals("?q=***&x=1", apply(secrets, "?q=my%20secret%20token&x=1"));
+    }
+
+    /**
+     * A browser's {@code encodeURIComponent} is not Java's {@code URLEncoder}: it writes a space as
+     * {@code %20} and leaves {@code !'()*~} alone. A secret holding one of those arrives from a
+     * system under test in a form no Java encoder produces.
+     */
+    @Test
+    void replacesTheBrowserUrlEncoding() {
+        List<String> secrets = List.of("a b'c!");
+        assertEquals("?q=***", apply(secrets, "?q=a%20b'c!"));
+        assertEquals("?q=***", apply(secrets, "?q=a%20b%27c%21"), "the Java form encoding is matched too");
+        assertEquals("?q=***", apply(secrets, "?q=a+b%27c%21"));
+    }
+
+    /** Both encoders emit upper-case hex; a URL that travelled through another tool often does not. */
+    @Test
+    void replacesLowercasePercentEscapes() {
+        List<String> secrets = List.of("user/p@ss word");
+        assertEquals("***", apply(secrets, "user%2Fp%40ss%20word"));
+        assertEquals("***", apply(secrets, "user%2fp%40ss%20word"), "lower-case hex");
+        assertEquals("***", apply(secrets, "user%2fp%40ss+word"));
     }
 
     @Test

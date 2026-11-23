@@ -171,6 +171,12 @@ public class RunController {
 
     // ----------------------------------------------------------------- helpers
 
+    /**
+     * Streams one frame run. The response is committed by the first event, so a failure after that
+     * point can no longer become an HTTP error: it ends the stream with an {@code error} event and
+     * a {@code frame-finished} whose status is {@code interrupted} (agents/specs/test-tour.md,
+     * "Run events"), the same shape the tour stream uses.
+     */
     private void streamRun(String frame, List<Step> steps, RunEngine.RunContext ctx, RunControl control,
                            HttpServletResponse response, Redactor redactor) throws IOException {
         Ndjson ndjson = new Ndjson(response, redactor, control);
@@ -182,7 +188,7 @@ public class RunController {
         ndjson.accept(started);
 
         List<CardResult> results = new ArrayList<>();
-        RunEngine.FrameOutcome outcome = engine.runFrame(steps, ctx, control, new RunListener() {
+        RunListener listener = new RunListener() {
             @Override
             public void cardStarted(int step, Card card, Instant at) {
                 Map<String, Object> event = new LinkedHashMap<>();
@@ -202,14 +208,33 @@ public class RunController {
                 event.put("result", result);
                 ndjson.accept(event);
             }
-        });
+        };
+
+        String status;
+        String stopped = null;
+        long elapsedMs = 0;
+        Map<String, Object> vars = Map.of();
+        try {
+            RunEngine.FrameOutcome outcome = engine.runFrame(steps, ctx, control, listener);
+            status = ProjectRuns.statusOf(outcome.stopped());
+            stopped = outcome.stopped();
+            elapsedMs = outcome.elapsedMs();
+            vars = outcome.vars();
+        } catch (RuntimeException e) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("event", "error");
+            error.put("message", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            ndjson.accept(error);
+            status = ProjectRuns.INTERRUPTED;
+            stopped = RunEngine.STOP_CANCELLED;
+        }
 
         Map<String, Object> finished = new LinkedHashMap<>();
         finished.put("event", "frame-finished");
-        finished.put("status", ProjectRuns.statusOf(outcome.stopped()));
-        finished.put("stopped", outcome.stopped());
-        finished.put("elapsedMs", outcome.elapsedMs());
-        finished.put("vars", outcome.vars());
+        finished.put("status", status);
+        finished.put("stopped", stopped);
+        finished.put("elapsedMs", elapsedMs);
+        finished.put("vars", vars);
         finished.put("counts", ProjectRuns.counts(results, totalCards(steps)));
         ndjson.accept(finished);
     }

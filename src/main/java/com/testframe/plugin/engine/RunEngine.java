@@ -17,6 +17,8 @@ import io.github.jsonassert.JsonataEvaluator;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -213,7 +215,9 @@ public class RunEngine {
         Future<Executed> future = WORKERS.submit(() -> execute(card, label, payloadCode, resultCard, snapshot, ctx,
                 timeout, at, offset));
         control.running(future);
-        long wait = Math.min(timeout + WATCHDOG_GRACE_MS, control.remainingMs());
+        // +1 ms: remainingMs() truncates, so a wait clamped by the deadline would end just before
+        // it and the card would be reported as its own timeout instead of the run deadline
+        long wait = Math.min(timeout + WATCHDOG_GRACE_MS, control.remainingMs() + 1);
         try {
             return future.get(wait, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
@@ -477,7 +481,19 @@ public class RunEngine {
             if (Names.isBlank(source.apiBase())) {
                 return c.fail("source " + ref + " has no apiBase");
             }
-            url = ABSOLUTE.matcher(path).matches() ? path : join(source.apiBase(), path);
+            if (ABSOLUTE.matcher(path).matches()) {
+                // The operation's path comes from a spec fetched over the network, so it is
+                // untrusted; the source's headers (which can hold credentials from a
+                // .private.yaml layer) go with every request of its cards and must never reach
+                // another host.
+                if (!sameHost(source.apiBase(), path)) {
+                    return c.fail("openapi-id \"" + openapiId + "\" points to another host (" + path
+                            + "): the headers of " + ref + " are only sent to its own host");
+                }
+                url = path;
+            } else {
+                url = join(source.apiBase(), path);
+            }
             if (source.headers() != null) {
                 source.headers().forEach((k, v) -> headers.put(k.toLowerCase(Locale.ROOT), v));
             }
@@ -648,6 +664,26 @@ public class RunEngine {
     private static String join(String base, String path) {
         String b = base.replaceAll("/+$", "");
         return path.startsWith("/") ? b + path : b + "/" + path;
+    }
+
+    /**
+     * Whether the absolute {@code url} of an operation stays on the host of the source's
+     * {@code apiBase}. An unusable URL is not the same host (deny by default): the request is
+     * refused before any header of the source leaves the plugin.
+     */
+    static boolean sameHost(String apiBase, String url) {
+        URI base = uriOf(apiBase);
+        URI target = uriOf(url);
+        return base != null && target != null && base.getHost() != null
+                && base.getHost().equalsIgnoreCase(target.getHost());
+    }
+
+    private static URI uriOf(String value) {
+        try {
+            return value == null ? null : new URI(value);
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private Object parse(String text) {

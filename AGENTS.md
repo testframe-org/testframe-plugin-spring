@@ -51,12 +51,15 @@ Errors are one model (`api/ApiExceptionHandler`); `api/ApiResponses` builds ever
   in flight, cancel by `runId`), `RunSlots` (at most `testframe.max-concurrent-runs`, else 429),
   `Ndjson` (one JSON object per line, flushed and **redacted per event**; a client that goes away
   cancels the run), `ApiFilter` (503 while shutting down, 401 without the configured bearer token,
-  413 over `Limits.MAX_REQUEST_BYTES`; **no CORS headers**), `ApiExceptionHandler`, `ApiResponses`.
+  403 for a non-loopback `Host` when no token is set, 413 over `Limits.MAX_REQUEST_BYTES`;
+  **no CORS headers**), `ApiExceptionHandler`, `ApiResponses`.
 - `engine/` — the only place cards execute: `RunEngine` (steps in order, cards in order, first error
   stops, a false jsonassert `conditional` marks the rest of its step `skipped`), `Bindings`
-  (`{{varName.path}}` against the variables published so far), `HttpCaller` (`java.net.http`),
+  (`{{varName.path}}` against the variables published so far), `HttpCaller` (`java.net.http`; also
+  fetches OpenAPI documents, capped at `Limits.MAX_RESPONSE_BODY_BYTES`),
   `MongoRunner` (the sync driver directly — **no Spring Data Mongo**, every connection comes from
-  the resolved sources), `OpenApiSpec` (an OpenAPI/Swagger 2 document distilled to its API base and
+  the resolved sources; at most `MAX_CLIENTS` clients are cached), `OpenApiSpec` (an OpenAPI/Swagger 2
+  document distilled to its API base and
   operations; fetched in memory per run, never cached to disk), `Redactor`, `RunControl` (cancel +
   deadlines), `RunListener`, `Limits`.
 - `format/` — **read-only decoders** of the project format: `MdEnvelope`, `Names`, `CardDecoder`,
@@ -75,19 +78,31 @@ Errors are one model (`api/ApiExceptionHandler`); `api/ApiResponses` builds ever
 ## Security
 
 - `engine/Redactor` is the single redactor. Each secret is replaced by `***` in its raw,
-  JSON-escaped and URL-encoded forms, longest first; secrets shorter than 4 characters are not
+  JSON-escaped and URL-encoded forms (Java's form encoding and the browser's `encodeURIComponent`,
+  each in upper and lower-case hex), longest first; secrets shorter than 4 characters are not
   substring-matched. Structural rules apply regardless of the secret list: URI user-info becomes
   `***@`, and `authorization`, `proxy-authorization`, `cookie` and `set-cookie` values (any object
   key with that name, case-insensitively) become `***`. Secrets are the values whose winning layer
   was a `.private.yaml` file (`SourcesDecoder.resolve`).
 - `format/ProjectDir` validates every path before reading: character whitelist, `..` rejected, the
-  resolved path must stay under the project's `testframe/`, symbolic links are never followed, only
-  `.md` under `frames/` and the `sources*.yaml` layers at the `testframe/` root, up to
-  `MAX_FILE_BYTES`. Cards' `.private.md` notes and `.testframebuild/` are never read.
+  **real** path (`Path.toRealPath()`) must stay under the project's real `testframe/` — so a
+  symbolic link on the frame folder or on any directory above the leaf cannot escape — symbolic
+  links are never followed, only `.md` under `frames/` and the `sources*.yaml` layers at the
+  `testframe/` root, up to `MAX_FILE_BYTES`. Cards' `.private.md` notes and `.testframebuild/` are
+  never read.
 - `format/SafeYaml` is a restricted loader: maps, lists and scalars only, YAML 1.2 core schema;
-  anchors, aliases, explicit tags, duplicate keys, complex keys and multiple documents are errors.
+  anchors, aliases, explicit tags, duplicate keys, complex keys, nesting deeper than `MAX_DEPTH`
+  and multiple documents are errors.
+- `format/MongoCall` refuses the server-side JavaScript operators (`$where`, `$function`,
+  `$accumulator`) anywhere in a call, next to `$out`/`$merge` and the other write guards; the
+  collation `strength` and the integer options are validated before the driver sees them.
+- A source's headers can hold credentials, so they never leave its own host: `HttpCaller` follows a
+  redirect only to the same host (never downgrading https), and `RunEngine` refuses an operation
+  whose absolute path points at another host than the source's `apiBase`.
 - Bind to `127.0.0.1` unless `testframe.token` is set (`BindGuard`); with a token, every
-  `/api/v1/**` request needs `Authorization: Bearer {token}`.
+  `/api/v1/**` request needs `Authorization: Bearer {token}`. Without a token, `ApiFilter` also
+  requires a loopback `Host` header (403 otherwise): loopback binding alone does not stop a browser
+  page whose domain resolves to 127.0.0.1 (DNS rebinding).
 
 Any change to a path rule, the redactor or a runner is security-sensitive: use the `guardian`
 thread, and add a test that would fail if the protection were removed.
@@ -113,8 +128,9 @@ java -jar target/testframe-plugin-spring.jar run <projectDir> --env <env> [--fra
 ```
 
 `--out` format follows the extension: `.json` = a redacted JSON report, `.xml` = JUnit (one
-`testsuite` per frame, one `testcase` per card). Exit codes: 0 passed, 1 failed, 2 bad invocation or
-missing sources, 3 interrupted, 4 internal error.
+`testsuite` per frame, one `testcase` per card). A report is never written into the project being
+run, and never through a symbolic link (exit 2): the plugin writes nothing to a project. Exit codes:
+0 passed, 1 failed, 2 bad invocation or missing sources, 3 interrupted, 4 internal error.
 
 ## Commands
 

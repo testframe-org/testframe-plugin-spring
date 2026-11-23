@@ -1,5 +1,6 @@
 package com.testframe.plugin.format;
 
+import org.bson.BsonDocument;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -118,5 +119,59 @@ class MongoCallTest {
         MongoCall c = MongoCall.parse("find", "products", "[{}, null, {\"limit\": 5}]");
         assertEquals(5, c.intOption("limit"));
         assertNull(c.projection());
+    }
+
+    /** Decision P5 ({@code agents/decisions-taken.md}): mongo filters refuse server-side JavaScript. */
+    @Test
+    void serverSideJavascriptOperatorsAreRefusedEverywhere() {
+        String where = "operator \"$where\" is not allowed in mongo cards (server-side JavaScript is refused)";
+        assertEquals("arg 1 (filter): " + where, problem("find", "[{\"$where\": \"this.preco > 10\"}]"));
+        assertEquals("arg 1 (filter): " + where, problem("deleteMany", "[{\"$where\": \"sleep(10000)\"}]"));
+        assertEquals("arg 1 (filter): " + where, problem("find", "[{\"ativo\": true, \"$or\": [{\"$where\": \"x\"}]}]"),
+                "a nested $where is found too");
+        assertEquals("arg 1 (pipeline): operator \"$function\" is not allowed in mongo cards (server-side JavaScript is refused)",
+                problem("aggregation", "[[{\"$addFields\": {\"x\": {\"$function\": "
+                        + "{\"body\": \"function() { return 1 }\", \"args\": [], \"lang\": \"js\"}}}}]]"));
+        assertEquals("arg 1 (pipeline): operator \"$accumulator\" is not allowed in mongo cards (server-side JavaScript is refused)",
+                problem("aggregation", "[[{\"$group\": {\"_id\": null, \"v\": {\"$accumulator\": {}}}}]]"));
+        assertEquals("arg 2 (update): operator \"$function\" is not allowed in mongo cards (server-side JavaScript is refused)",
+                problem("updateOne", "[{\"a\": 1}, [{\"$set\": {\"b\": {\"$function\": {}}}}]]"));
+        assertEquals("arg 1 (document): " + where, problem("insertOne", "[{\"a\": {\"$where\": \"x\"}}]"));
+        assertEquals("arg 3 (options): operator \"$function\" is not allowed in mongo cards (server-side JavaScript is refused)",
+                problem("find", "[{}, null, {\"let\": {\"x\": {\"$function\": {}}}}]"),
+                "an option value is scanned too");
+        assertThrows(IllegalArgumentException.class,
+                () -> MongoCall.parse("find", "products", "[{\"$where\": \"this.preco > 10\"}]"),
+                "the refusal also holds when the call is parsed for a run, not only as a code rule");
+        assertNull(problem("find", "[{\"preco\": {\"$gt\": 10}}]"), "ordinary query operators are untouched");
+    }
+
+    @Test
+    void collationStrengthMustBeAnIntegerFrom1To5() {
+        assertNull(problem("find", "[{}, null, {\"collation\": {\"locale\": \"pt\", \"strength\": 3}}]"));
+        String expected = "arg 3 (options): invalid collation: strength must be 1, 2, 3, 4 or 5";
+        assertEquals(expected, problem("find", "[{}, null, {\"collation\": {\"locale\": \"pt\", \"strength\": 2.5}}]"),
+                "2.5 is refused instead of being truncated to 2 on the way to the driver");
+        assertEquals(expected, problem("find", "[{}, null, {\"collation\": {\"locale\": \"pt\", \"strength\": \"3\"}}]"),
+                "the plugin reports the value, not the driver's own message");
+        assertEquals(expected, problem("find", "[{}, null, {\"collation\": {\"locale\": \"pt\", \"strength\": 0}}]"));
+        assertEquals(expected, problem("find", "[{}, null, {\"collation\": {\"locale\": \"pt\", \"strength\": 6}}]"));
+        assertEquals("invalid collation: strength must be 1, 2, 3, 4 or 5", assertThrows(IllegalArgumentException.class,
+                () -> MongoCall.collationOf(BsonDocument.parse("{\"locale\": \"pt\", \"strength\": 2.5}"))).getMessage());
+        assertNull(problem("find", "[{}, null, {\"collation\": {{collation}}}]"),
+                "a binding standing for the whole collation is only checked once resolved");
+    }
+
+    @Test
+    void integerOptionsAreValidatedBeforeTheDriverSeesThem() {
+        assertEquals("arg 3 (options): limit must be a non-negative integer", problem("find", "[{}, null, {\"limit\": 2.5}]"));
+        assertEquals("arg 3 (options): limit must be a non-negative integer", problem("find", "[{}, null, {\"limit\": \"3\"}]"));
+        assertEquals("arg 3 (options): skip must be a non-negative integer", problem("find", "[{}, null, {\"skip\": -1}]"));
+        assertEquals("arg 3 (options): skip must be a non-negative integer", problem("find", "[{}, null, {\"skip\": 1.5}]"));
+        assertEquals("arg 3 (options): maxTimeMS must be a non-negative integer", problem("find", "[{}, null, {\"maxTimeMS\": 1.5}]"));
+        assertEquals("arg 2 (options): batchSize must be a positive integer", problem("aggregation", "[[{}], {\"batchSize\": \"10\"}]"));
+        assertEquals("arg 2 (options): batchSize must be a positive integer", problem("aggregation", "[[{}], {\"batchSize\": 2.5}]"));
+        assertNull(problem("find", "[{}, null, {\"limit\": 0, \"skip\": 0, \"maxTimeMS\": 0}]"),
+                "0 means no limit of the card's own");
     }
 }
