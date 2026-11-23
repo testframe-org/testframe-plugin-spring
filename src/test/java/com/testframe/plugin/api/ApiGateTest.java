@@ -99,6 +99,14 @@ class ApiGateTest {
         assertEquals(200, response.status(), response.body());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/tour", "/tour/", "/tour?project=product-test", "/tour/?project=product-test"})
+    void theTourEntryServesTheIndexPageWithoutTheToken(String path) throws IOException {
+        Response response = send("GET", path, null);
+        assertEquals(200, response.status(), path + " " + response.body());
+        assertTrue(response.body().contains("<div id=\"root\">") || response.body().contains("<script"), response.body());
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private record Response(int status, String body) {
