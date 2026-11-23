@@ -303,7 +303,7 @@ public final class SourcesDecoder {
             if (s.isString()) {
                 return s.text();
             }
-            errors.add(where + ": must be a string (quote " + s.text() + ")");
+            errors.add(where + ": must be a string (quote it)");
             return STRING_ERROR;
         }
         errors.add(where + ": must be a string");

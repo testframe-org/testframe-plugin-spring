@@ -44,14 +44,25 @@ class CardDecoderTest {
         CardDecoder.Decoded decoded = decode("x", card("source: mongo/db\n", "[]"));
         assertTrue(decoded.errors().contains("title: required"));
         assertTrue(decoded.errors().contains("subtype: required for mongo (find, aggregation, deleteOne, deleteMany, updateOne, updateMany, insertOne, insertMany)"));
-        assertTrue(decoded.errors().contains("collection: required on mongo cards (the collection the card works on)"));
+        assertTrue(decoded.errors().contains("collection: required on mongo cards (the collection the call works on)"));
         assertEquals("x", decoded.card().varName());
+    }
+
+    @Test
+    void sourceRefFollowsTheSpecGrammar() {
+        // same grammar as the IDE's card-codec: lowercase, no dots in the name-source
+        String expected = "source: source must be {type-source} or {type-source}/{name-source}";
+        assertTrue(decode("a", card("title: A\nsource: mongo/Products-DB\nsubtype: find\ncollection: p\n", "[]")).errors().contains(expected));
+        assertTrue(decode("a", card("title: A\nsource: mongo/products.db\nsubtype: find\ncollection: p\n", "[]")).errors().contains(expected));
+        assertTrue(decode("a", card("title: A\nsource: MONGO/products-db\nsubtype: find\ncollection: p\n", "[]")).errors().contains(expected));
     }
 
     @Test
     void validatesKnownRules() {
         assertTrue(decode("a", card("title: A\nsource: nope\n", "")).errors().contains("source: unknown type-source"));
-        assertTrue(decode("a", card("title: A\nsource: rawvalue\nsubtype: find\n", "")).errors().contains("subtype: rawvalue has no subtypes"));
+        // rawvalue has one subtype (json), so a wrong one is an unknown subtype, not "no subtypes"
+        assertTrue(decode("a", card("title: A\nsource: rawvalue\nsubtype: find\n", "")).errors().contains("subtype: unknown subtype \"find\" of rawvalue (json)"));
+        assertTrue(decode("a", card("title: A\nsource: kafka\nsubtype: find\n", "")).errors().contains("subtype: kafka has no subtypes"));
         assertTrue(decode("a", card("title: A\nsource: rawvalue\ncollection: x\n", "")).errors().contains("collection: only mongo cards name a collection"));
         assertTrue(decode("a", card("title: A\nsource: rawvalue\nopenapi-id: op\n", "")).errors().contains("openapi-id: only openapi cards name a spec operation"));
         assertTrue(decode("a", card("title: A\nsource: rawvalue\ntimeout: 50\n", "")).errors().contains("timeout: must be >= 100"));

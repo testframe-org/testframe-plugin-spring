@@ -4,6 +4,7 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.error.Mark;
+import org.yaml.snakeyaml.error.MarkedYAMLException;
 import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.events.AliasEvent;
 import org.yaml.snakeyaml.events.CollectionStartEvent;
@@ -88,7 +89,7 @@ public final class SafeYaml {
                 events.add(e);
             }
         } catch (YAMLException e) {
-            throw new YamlProblem("invalid YAML: " + oneLine(e.getMessage()));
+            throw new YamlProblem(describe(e));
         }
         long documents = events.stream().filter(e -> e instanceof DocumentStartEvent).count();
         if (documents > 1) {
@@ -185,7 +186,41 @@ public final class SafeYaml {
         return mark == null ? "" : "line " + (mark.getLine() + 1) + ": ";
     }
 
-    private static String oneLine(String message) {
-        return message == null ? "" : message.replaceAll("\\s+", " ").trim();
+    /**
+     * The parser's error without any of the document: SnakeYAML's own message quotes a snippet
+     * of the offending line, which in a private layer is a secret that no redactor can know (the
+     * layer did not parse). Only the problem statement and the line/column of its mark are kept;
+     * quoted fragments longer than a token and tag handles are masked too, since some problems
+     * name document text.
+     */
+    static String describe(YAMLException e) {
+        if (!(e instanceof MarkedYAMLException marked)) {
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            return message.startsWith("The incoming YAML document exceeds the limit")
+                    ? "invalid YAML: the document exceeds the size limit"
+                    : "invalid YAML";
+        }
+        Mark mark = marked.getProblemMark() != null ? marked.getProblemMark() : marked.getContextMark();
+        String where = mark == null ? "" : " at line " + (mark.getLine() + 1) + ", column " + (mark.getColumn() + 1);
+        String problem = sanitize(marked.getProblem() != null ? marked.getProblem() : marked.getContext());
+        return "invalid YAML" + where + (problem.isEmpty() ? "" : ": " + problem);
+    }
+
+    private static final Pattern QUOTED = Pattern.compile("'([^']*)'|\"([^\"]*)\"");
+    private static final Pattern TOKEN = Pattern.compile(".{0,2}|<[A-Za-z ]+>", Pattern.DOTALL);
+    private static final Pattern TAG = Pattern.compile("!\\S*");
+    private static final int MAX_PROBLEM = 160;
+
+    private static String sanitize(String problem) {
+        if (problem == null) {
+            return "";
+        }
+        String text = problem.replaceAll("\\s+", " ").trim();
+        text = QUOTED.matcher(text).replaceAll(m -> {
+            String inner = m.group(1) != null ? m.group(1) : m.group(2);
+            return TOKEN.matcher(inner).matches() ? java.util.regex.Matcher.quoteReplacement(m.group()) : "'...'";
+        });
+        text = TAG.matcher(text).replaceAll("!...");
+        return text.length() > MAX_PROBLEM ? text.substring(0, MAX_PROBLEM) + "..." : text;
     }
 }

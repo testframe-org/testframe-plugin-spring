@@ -6,8 +6,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.io.IOException;
 
@@ -34,6 +36,17 @@ public class ApiExceptionHandler {
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public void media(HttpServletRequest request, HttpServletResponse response) throws IOException {
         ApiResponses.error(response, 415, "the request body must be JSON", null, ApiResponses.redactor(request));
+    }
+
+    /** No route and no static resource: 404, without echoing the path. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public void notFound(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        ApiResponses.error(response, 404, "not found", null, ApiResponses.redactor(request));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public void method(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        ApiResponses.error(response, 405, "method not allowed", null, ApiResponses.redactor(request));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

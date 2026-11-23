@@ -28,7 +28,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -39,10 +40,90 @@ import java.util.function.Consumer;
  * (one {@code <testsuite>} per frame, one {@code <testcase>} per card). No web server starts and
  * nothing is written to the project. Exit codes: 0 passed, 1 failed, 2 bad invocation or project,
  * 3 interrupted (SIGINT/SIGTERM), 4 internal error.
+ *
+ * <p>On SIGINT/SIGTERM the shutdown hook cancels the frame in progress, waits up to
+ * {@link #REPORT_GRACE_MS} for the main thread to write the reports (with what ran; the frames not
+ * started are {@code not-run}) and halts the JVM with exit code 3. Every line printed to stdout or
+ * stderr passes through the redactor.
  */
 public final class Cli {
 
     public static final String COMMAND = "run";
+
+    /** A frame the run never started (interrupted before it). */
+    public static final String NOT_RUN = "not-run";
+
+    /** How long the shutdown hook waits for the reports before halting. */
+    static final long REPORT_GRACE_MS = 5_000;
+
+    /**
+     * The interruption of a run by SIGINT/SIGTERM, shared by the main thread and the shutdown hook.
+     * {@link #interrupt()} cancels the frame in progress and, while frames are running, interrupts
+     * the main thread (an OpenAPI spec fetch is abandoned too); once the main thread reports, it is
+     * never interrupted again, so the report files are written whole.
+     */
+    static final class Interruption {
+        private final Thread main;
+        private final CountDownLatch done = new CountDownLatch(1);
+        private boolean requested;
+        private boolean reporting;
+        private RunControl active;
+
+        Interruption(Thread main) {
+            this.main = main;
+        }
+
+        /** SIGINT/SIGTERM: stop the run (idempotent). */
+        synchronized void interrupt() {
+            requested = true;
+            if (active != null) {
+                active.cancel();
+            }
+            if (!reporting) {
+                main.interrupt();
+            }
+        }
+
+        synchronized boolean requested() {
+            return requested;
+        }
+
+        /** The frame about to run; cancelled at once when an interruption already arrived. */
+        synchronized void running(RunControl control) {
+            active = control;
+            if (requested && control != null) {
+                control.cancel();
+            }
+        }
+
+        /** Called by the main thread before it writes the reports: no more thread interrupts. */
+        synchronized void reporting() {
+            reporting = true;
+            active = null;
+            Thread.interrupted(); // clears a pending interrupt so the report files can be written
+        }
+
+        /** The reports are written (or there were none to write). */
+        void finished() {
+            done.countDown();
+        }
+
+        boolean awaitFinished(long ms) {
+            try {
+                return done.await(ms, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+    }
+
+    /** Test seam: called with the run's interruption before the first frame starts. */
+    Consumer<Interruption> onInterruption = i -> { };
+    /** Test seam: false runs without registering the JVM shutdown hook. */
+    boolean installShutdownHook = true;
+    /** What stderr lines pass through: structural rules first, the environment's secrets once known. */
+    private Redactor errRedactor = Redactor.structural();
 
     /** One parsed invocation. */
     record Invocation(Path projectDir, String env, List<String> frames, List<Path> outputs) {
@@ -65,7 +146,7 @@ public final class Cli {
         try {
             return execute(invocation, out, err, mongo);
         } catch (RuntimeException e) {
-            err.println("run: internal error: " + oneLine(e));
+            printErr(err, "run: internal error: " + oneLine(e));
             return 4;
         } finally {
             mongo.close();
@@ -85,14 +166,14 @@ public final class Cli {
             switch (arg) {
                 case "--env" -> {
                     if (++i >= args.length) {
-                        err.println("run: --env needs a value");
+                        printErr(err, "run: --env needs a value");
                         return null;
                     }
                     env = args[i];
                 }
                 case "--frames" -> {
                     if (++i >= args.length) {
-                        err.println("run: --frames needs a comma-separated list of frame names");
+                        printErr(err, "run: --frames needs a comma-separated list of frame names");
                         return null;
                     }
                     List<String> names = new ArrayList<>();
@@ -103,31 +184,31 @@ public final class Cli {
                         }
                     }
                     if (names.isEmpty()) {
-                        err.println("run: --frames needs a comma-separated list of frame names");
+                        printErr(err, "run: --frames needs a comma-separated list of frame names");
                         return null;
                     }
                     frames = names;
                 }
                 case "--out" -> {
                     if (++i >= args.length) {
-                        err.println("run: --out needs a file (.json or .xml)");
+                        printErr(err, "run: --out needs a file (.json or .xml)");
                         return null;
                     }
                     Path path = Path.of(args[i]);
                     String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
                     if (!name.endsWith(".json") && !name.endsWith(".xml")) {
-                        err.println("run: --out format follows the extension (.json or .xml): " + args[i]);
+                        printErr(err, "run: --out format follows the extension (.json or .xml): " + args[i]);
                         return null;
                     }
                     outputs.add(path);
                 }
                 default -> {
                     if (arg.startsWith("--")) {
-                        err.println("run: unknown option " + arg);
+                        printErr(err, "run: unknown option " + arg);
                         return null;
                     }
                     if (projectDir != null) {
-                        err.println("run: unexpected argument " + arg);
+                        printErr(err, "run: unexpected argument " + arg);
                         return null;
                     }
                     projectDir = Path.of(arg);
@@ -140,7 +221,7 @@ public final class Cli {
             return null;
         }
         if (env == null || env.isBlank()) {
-            err.println("run: --env is required");
+            printErr(err, "run: --env is required");
             return null;
         }
         return new Invocation(projectDir, env, frames, List.copyOf(outputs));
@@ -161,7 +242,7 @@ public final class Cli {
         try {
             dir = ProjectDir.at(inv.projectDir());
         } catch (IllegalArgumentException e) {
-            err.println("run: " + e.getMessage());
+            printErr(err, "run: " + e.getMessage());
             return 2;
         }
 
@@ -169,19 +250,22 @@ public final class Cli {
         try {
             sources = runs.sources(dir);
         } catch (IOException e) {
-            err.println("run: cannot read the sources files: " + oneLine(e));
+            printErr(err, "run: cannot read the sources files: " + oneLine(e));
             return 4;
         }
         if (!sources.valid()) {
-            sources.errors().forEach(err::println);
+            sources.errors().forEach(line -> printErr(err, line));
             return 2;
+        }
+        if (sources.hasEnvironment(inv.env())) {
+            errRedactor = new Redactor(SourcesDecoder.resolve(sources, inv.env()).secrets());
         }
 
         List<String> frameNames;
         try {
             frameNames = inv.frames() != null ? inv.frames() : dir.frameNames();
         } catch (IOException e) {
-            err.println("run: cannot list the frames: " + oneLine(e));
+            printErr(err, "run: cannot list the frames: " + oneLine(e));
             return 4;
         }
 
@@ -193,43 +277,57 @@ public final class Cli {
                 frames.add(new FrameRun(prepared, null));
                 prepareds.add(prepared);
             } catch (ProblemException e) {
-                e.problems().forEach(err::println);
+                e.problems().forEach(line -> printErr(err, line));
                 return 2;
             } catch (IOException e) {
-                err.println("run: cannot read frame " + name + ": " + oneLine(e));
+                printErr(err, "run: cannot read frame " + name + ": " + oneLine(e));
                 return 4;
             }
         }
 
         Instant startedAt = Instant.now();
-        AtomicReference<RunControl> active = new AtomicReference<>();
+        Interruption interruption = new Interruption(Thread.currentThread());
         Thread hook = new Thread(() -> {
-            RunControl control = active.get();
-            if (control != null) {
-                control.cancel();
-            }
+            interruption.interrupt();
+            interruption.awaitFinished(REPORT_GRACE_MS);
+            out.flush();
+            err.flush();
+            Runtime.getRuntime().halt(3);
         }, "testframe-cli-shutdown");
-        Runtime.getRuntime().addShutdownHook(hook);
+        if (installShutdownHook) {
+            Runtime.getRuntime().addShutdownHook(hook);
+        }
+        onInterruption.accept(interruption);
 
-        List<FrameRun> completed = new ArrayList<>();
-        String result;
         try {
-            for (FrameRun fr : frames) {
-                ProjectRuns.Prepared prepared = fr.prepared();
-                RunControl control = RunControl.withDeadline(null);
-                active.set(control);
-                Redactor redactor = prepared.redactor();
-                Consumer<Map<String, Object>> sink = event -> {
-                    if ("card-finished".equals(event.get("event")) && event.get("result") instanceof CardResult card) {
-                        out.println(redactor.apply(card.text()));
+            List<FrameRun> completed = new ArrayList<>();
+            String result;
+            try {
+                for (FrameRun fr : frames) {
+                    if (interruption.requested()) {
+                        break;
                     }
-                };
-                ProjectRuns.FrameSummary summary = runs.run(prepared, null, control, sink);
-                active.set(null);
-                completed.add(new FrameRun(prepared, summary));
-                out.println("frame " + summary.frame() + ": " + summary.status() + " " + counts(summary.counts()));
+                    ProjectRuns.Prepared prepared = fr.prepared();
+                    RunControl control = RunControl.withDeadline(null);
+                    interruption.running(control);
+                    Redactor redactor = prepared.redactor();
+                    Consumer<Map<String, Object>> sink = event -> {
+                        if ("card-finished".equals(event.get("event")) && event.get("result") instanceof CardResult card) {
+                            out.println(redactor.apply(card.text()));
+                        }
+                    };
+                    ProjectRuns.FrameSummary summary = runs.run(prepared, null, control, sink);
+                    interruption.running(null);
+                    completed.add(new FrameRun(prepared, summary));
+                    out.println("frame " + summary.frame() + ": " + summary.status() + " " + counts(summary.counts()));
+                    if (ProjectRuns.INTERRUPTED.equals(summary.status())) {
+                        break;
+                    }
+                }
+            } finally {
+                interruption.reporting();
             }
-            boolean interrupted = false;
+            boolean interrupted = interruption.requested();
             boolean failed = false;
             for (FrameRun fr : completed) {
                 if (ProjectRuns.INTERRUPTED.equals(fr.summary().status())) {
@@ -238,18 +336,37 @@ public final class Cli {
                     failed = true;
                 }
             }
+            for (FrameRun fr : frames.subList(completed.size(), frames.size())) {
+                ProjectRuns.FrameSummary notRun = notRun(fr.prepared());
+                completed.add(new FrameRun(fr.prepared(), notRun));
+                out.println("frame " + notRun.frame() + ": " + NOT_RUN + " " + counts(notRun.counts()));
+            }
             result = interrupted ? ProjectRuns.INTERRUPTED : failed ? ProjectRuns.FAILED : ProjectRuns.PASSED;
+
+            writeReports(inv, dir.name(), result, startedAt, Instant.now(), completed, prepareds, err);
+            return exitCode(result);
         } finally {
-            active.set(null);
-            try {
-                Runtime.getRuntime().removeShutdownHook(hook);
-            } catch (IllegalStateException ignored) {
-                // already shutting down
+            out.flush();
+            err.flush();
+            interruption.finished();
+            if (installShutdownHook) {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(hook);
+                } catch (IllegalStateException ignored) {
+                    // shutting down: the hook halts with exit code 3 once it sees finished()
+                }
             }
         }
+    }
 
-        writeReports(inv, dir.name(), result, startedAt, Instant.now(), completed, prepareds, err);
-        return exitCode(result);
+    /** A frame the run never started: every card {@code notRun}, no results. */
+    private static ProjectRuns.FrameSummary notRun(ProjectRuns.Prepared prepared) {
+        return new ProjectRuns.FrameSummary(prepared.frame(), NOT_RUN, null, 0,
+                ProjectRuns.counts(List.of(), totalCards(prepared.steps())), List.of(), prepared.inputs(), Map.of());
+    }
+
+    private void printErr(PrintStream err, String line) {
+        err.println(errRedactor.apply(line));
     }
 
     /** 0 passed, 1 failed, 3 interrupted (2 and 4 are returned by the caller). */
@@ -277,7 +394,7 @@ public final class Cli {
                     Files.writeString(output, junitXml(completed, redactor));
                 }
             } catch (IOException e) {
-                err.println("run: cannot write " + output + ": " + oneLine(e));
+                err.println(redactor.apply("run: cannot write " + output + ": " + oneLine(e)));
             }
         }
     }

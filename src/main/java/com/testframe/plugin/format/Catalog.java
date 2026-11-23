@@ -105,7 +105,7 @@ public final class Catalog {
 
     /**
      * Problem of a card's (type, subtype) pair, or null: types with subtypes require one of
-     * theirs, types without subtypes (and rawvalue cards) accept none.
+     * theirs, types without subtypes (kafka, grpc) accept none.
      */
     public static String subtypeProblem(String typeName, String subtype) {
         Optional<Type> type = type(typeName);

@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 /**
- * Request gate of {@code /api/v1/**}: 503 while shutting down, 401 without the configured
+ * Request gate of every request but the tour assets (see {@link #shouldNotFilter}): 503 while shutting down, 401 without the configured
  * {@code Authorization: Bearer {token}}, 413 for bodies over {@link Limits#MAX_REQUEST_BYTES}
  * (declared length, or counted while reading). The plugin sends no CORS headers.
  */
@@ -46,9 +46,27 @@ public class ApiFilter extends OncePerRequestFilter implements ApplicationListen
         closing = true;
     }
 
+    /**
+     * Deny by default: every request is gated except a plain {@code GET}/{@code HEAD} of a tour
+     * asset. The exemption is decided on the raw request URI with a strict whitelist (letters,
+     * digits, {@code .}, {@code _}, {@code -} per segment, no dot-segments, no percent-escapes, no
+     * {@code ;params}, no empty segments), so decoding cannot change what it names: Spring routes on
+     * the decoded path without {@code ;params}, and a prefix check on the raw URI let
+     * {@code /%61pi/v1/run} or {@code /api;x=1/v1/run} reach a controller ungated.
+     */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/");
+        return isTourAsset(request.getMethod(), request.getRequestURI());
+    }
+
+    private static final java.util.regex.Pattern TOUR_ASSET =
+            java.util.regex.Pattern.compile("/tour(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*/?");
+
+    static boolean isTourAsset(String method, String rawUri) {
+        if (!"GET".equals(method) && !"HEAD".equals(method)) {
+            return false;
+        }
+        return rawUri != null && TOUR_ASSET.matcher(rawUri).matches() && !rawUri.contains("..");
     }
 
     @Override

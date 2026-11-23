@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  */
 public final class CardDecoder {
 
-    private static final Pattern SOURCE_REF = Pattern.compile("([a-z]+)(?:/([a-z0-9][a-z0-9._-]*))?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SOURCE_REF = Pattern.compile("([a-z]+)(?:/([a-z0-9][a-z0-9_-]*))?");
     private static final Pattern SIZE = Pattern.compile("\\d+x\\d+");
     private static final Pattern OPERATION_ID = Pattern.compile("[A-Za-z0-9_.-]+");
     private static final Pattern NUMBER = Pattern.compile("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?");

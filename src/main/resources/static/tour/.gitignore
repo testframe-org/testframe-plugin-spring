@@ -1,0 +1,5 @@
+# Generated output — the static tour-ui bundle, written here by
+# `cd modules/testframe-tour-ui && bun run build` (scripts/sync-plugin.ts) and packaged into the
+# jar so the plugin serves the screens at /tour. Nothing in this folder is committed.
+*
+!.gitignore
