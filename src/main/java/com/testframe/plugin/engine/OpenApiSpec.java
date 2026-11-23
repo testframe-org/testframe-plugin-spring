@@ -13,7 +13,7 @@ import java.util.Map;
 
 /**
  * What an {@code openapi} source offers to its cards, distilled from its OpenAPI (or Swagger 2)
- * JSON document (docs/project-format.md, "OpenAPI sources and their operations"): the API base
+ * JSON document (agents/specs/project-format.md, "OpenAPI sources and their operations"): the API base
  * ({@code servers[0].url} resolved against the spec URL; the spec URL's origin when the document
  * names no server) and the operations. The plugin fetches a spec only for tour and CLI runs, once
  * per run, in memory; runner-protocol requests carry the operations.

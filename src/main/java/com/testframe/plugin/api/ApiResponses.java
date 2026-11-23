@@ -37,7 +37,7 @@ public final class ApiResponses {
         Json.MAPPER.writeValue(response.getOutputStream(), redactor.tree(body, Json.MAPPER));
     }
 
-    /** The error body {@code {status, message, problems?}} (docs/runner-protocol.md, "Errors"). */
+    /** The error body {@code {status, message, problems?}} (agents/specs/runner-protocol.md, "Errors"). */
     public static void error(HttpServletResponse response, int status, String message, List<String> problems,
                              Redactor redactor) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();

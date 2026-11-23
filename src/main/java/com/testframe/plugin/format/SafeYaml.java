@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * The restricted YAML loader of the {@code sources*.yaml} layers (docs/project-format.md,
+ * The restricted YAML loader of the {@code sources*.yaml} layers (agents/specs/project-format.md,
  * "Sources"): maps, lists and scalars only, typed with the YAML 1.2 core schema; anchors,
  * aliases, explicit tags, duplicate keys, complex keys and multiple documents are errors. It
  * works on the parser's event stream, so no object is ever constructed from the document.

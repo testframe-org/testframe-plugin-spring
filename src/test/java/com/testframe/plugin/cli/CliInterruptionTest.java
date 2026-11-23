@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The CLI interrupted by SIGINT/SIGTERM (docs/test-tour.md, "Headless CLI"): the card in progress
+ * The CLI interrupted by SIGINT/SIGTERM (agents/specs/test-tour.md, "Headless CLI"): the card in progress
  * is abandoned, the frames after it do not run (they are reported {@code not-run}), the reports
  * are still written with what ran, and the exit code is 3. The in-process tests trigger the same
  * {@link Cli.Interruption} the shutdown hook uses; the subprocess tests send the real signals.

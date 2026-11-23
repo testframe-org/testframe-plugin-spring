@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * One resolved source of a run request (docs/runner-protocol.md, "Sources (request)"), keyed by
+ * One resolved source of a run request (agents/specs/runner-protocol.md, "Sources (request)"), keyed by
  * {@code {type}/{name}}: openapi {@code {apiBase, headers, operations}}, mongo {@code {uri}},
  * sql/kafka/grpc {@code {url}}. {@code headers} are sent with every request of the source's
  * cards (names lower-case).

@@ -6,7 +6,7 @@ import java.util.Optional;
 
 /**
  * Source types, their card subtypes and the card defaults derived from them (spec:
- * docs/project-format.md, "Source types and subtypes"). A source has a TYPE (its key in
+ * agents/specs/project-format.md, "Source types and subtypes"). A source has a TYPE (its key in
  * {@code sources.yaml}); a card bound to it picks a SUBTYPE of that type when the type has
  * subtypes. The card type and the default timeout follow (type, subtype).
  */

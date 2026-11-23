@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * A mongo card's call (spec: docs/project-format.md, "Mongo cards"): the collection (the card's
+ * A mongo card's call (spec: agents/specs/project-format.md, "Mongo cards"): the collection (the card's
  * {@code collection:} frontmatter), the function named by the subtype, and the card body — one
  * JSON array whose items are the function's positional arguments, like the shell call
  * {@code db.products.find(<arg0>, <arg1>, <arg2>)}. Trailing optional arguments may be omitted.

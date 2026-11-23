@@ -35,7 +35,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The card runner (docs/runner-protocol.md; execution order in docs/project-format.md):
+ * The card runner (agents/specs/runner-protocol.md; execution order in agents/specs/project-format.md):
  * {@code {{bindings}}}, openapi requests ({@link HttpCaller}), mongo calls ({@link MongoRunner}),
  * jsonassert scripts and conditionals (the Java engine), rawvalue literals and simulated types,
  * publishing one variable per card, writing request/mongo results into the next JSON card and

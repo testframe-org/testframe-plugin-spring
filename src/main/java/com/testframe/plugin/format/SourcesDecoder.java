@@ -14,7 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Read-only decoder of the layered sources of a project (docs/project-format.md, "Sources"):
+ * Read-only decoder of the layered sources of a project (agents/specs/project-format.md, "Sources"):
  * {@code sources.yaml} (environments + every source) ← {@code sources.private.yaml} ←
  * {@code sources.{env}.yaml} ← {@code sources.{env}.private.yaml}. {@link #decode} validates the
  * files; {@link #resolve} merges them for one environment (last wins, {@code null} removes,
@@ -392,7 +392,7 @@ public final class SourcesDecoder {
     }
 
     /**
-     * The secrets of one private value (docs/runner-protocol.md, "Secrets"): the whole value;
+     * The secrets of one private value (agents/specs/runner-protocol.md, "Secrets"): the whole value;
      * for a URI with user-info also the password and {@code user:password} (decoded forms too);
      * for a {@code {scheme} {token}} header value also the token.
      */

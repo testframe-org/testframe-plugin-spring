@@ -8,7 +8,7 @@ import java.util.Properties;
 public final class PluginInfo {
 
     public static final String NAME = "testframe-plugin-spring";
-    /** The runner protocol version (docs/runner-protocol.md, "Versioning"). */
+    /** The runner protocol version (agents/specs/runner-protocol.md, "Versioning"). */
     public static final int PROTOCOL = 1;
     public static final String VERSION = loadVersion();
 

@@ -20,8 +20,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * The single redactor every outgoing string passes through (docs/runner-protocol.md,
- * "Security"; docs/test-tour.md, "Redaction"): responses, NDJSON events, error messages and log
+ * The single redactor every outgoing string passes through (agents/specs/runner-protocol.md,
+ * "Security"; agents/specs/test-tour.md, "Redaction"): responses, NDJSON events, error messages and log
  * lines. Each secret is replaced by {@code ***}, matching its raw value, its JSON-escaped form and
  * its URL-encoded forms, longest first; secrets shorter than 4 characters are not
  * substring-matched. Structural rules apply whatever the secrets: the user-info of any URI is

@@ -15,7 +15,7 @@ import java.io.IOException;
 
 /**
  * Maps request-level failures to the error body {@code {status, message, problems?}}
- * (docs/runner-protocol.md, "Errors"), redacted. Card-level failures are never HTTP errors: they
+ * (agents/specs/runner-protocol.md, "Errors"), redacted. Card-level failures are never HTTP errors: they
  * come back as the card's {@code status: "error"} result.
  */
 @RestControllerAdvice

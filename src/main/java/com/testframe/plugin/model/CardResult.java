@@ -3,7 +3,7 @@ package com.testframe.plugin.model;
 import java.util.Map;
 
 /**
- * Outcome of one card (docs/runner-protocol.md, "CardResult"): {@code status} success, error or
+ * Outcome of one card (agents/specs/runner-protocol.md, "CardResult"): {@code status} success, error or
  * skipped; {@code text} the one-line log {@code [Step n] {title}: {summary}}; {@code output} the
  * payload as text; {@code ranAt} the ISO-8601 instant the card started; {@code offsetMs} from the
  * start of the run; {@code elapsedMs} the card's own duration; {@code code} only when the run

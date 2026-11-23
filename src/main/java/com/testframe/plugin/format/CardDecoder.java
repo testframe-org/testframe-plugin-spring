@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 /**
  * Read-only decoder of one card file ({@code frames/{frame}/step-{n}/{var-file}.md}; spec:
- * docs/project-format.md, "Cards"). The var-name comes from the file name; the frontmatter holds
+ * agents/specs/project-format.md, "Cards"). The var-name comes from the file name; the frontmatter holds
  * only what the path cannot express. An invalid card still decodes best effort (so a run can
  * report it as that card's error) together with its problems.
  */

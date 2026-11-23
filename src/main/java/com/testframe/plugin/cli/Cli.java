@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * The headless CLI (docs/test-tour.md, "Headless CLI"): {@code run <projectDir> --env <env>
+ * The headless CLI (agents/specs/test-tour.md, "Headless CLI"): {@code run <projectDir> --env <env>
  * [--frames a,b] [--out file.json|file.xml]}. It reads the project with the read-only decoders,
  * resolves the sources in the environment, runs the frames and prints each card's text plus a
  * line per frame result. With {@code --out} it also writes a redacted JSON report or JUnit XML

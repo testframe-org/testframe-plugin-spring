@@ -1,6 +1,6 @@
 package com.testframe.plugin.engine;
 
-/** The plugin's fixed limits, served in {@code GET /api/v1/health} (docs/runner-protocol.md). */
+/** The plugin's fixed limits, served in {@code GET /api/v1/health} (agents/specs/runner-protocol.md). */
 public final class Limits {
 
     public static final int MIN_CARD_TIMEOUT_MS = 100;

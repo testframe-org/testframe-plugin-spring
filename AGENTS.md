@@ -15,9 +15,9 @@ plugin**: it runs tests and produces evidence. All code, comments and docs in En
   events, error messages, log lines and CLI reports.
 - Read-only access to a project is validated like a write would be: see `format/ProjectDir`.
 
-Specs — they win over this file: `docs/runner-protocol.md` (the `/api/v1` API, errors, timeouts,
-redaction) and `docs/test-tour.md` (tour API, events, CLI). Format:
-`modules/testframe-ide/docs/project-format.md`.
+Specs — they win over this file: `agents/specs/runner-protocol.md` (the `/api/v1` API, errors, timeouts,
+redaction) and `agents/specs/test-tour.md` (tour API, events, CLI). Format:
+`agents/specs/project-format.md`.
 
 ## API
 

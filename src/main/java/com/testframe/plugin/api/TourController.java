@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The stateless tour API (docs/test-tour.md), base {@code /api/v1/tour}. It reads the project
+ * The stateless tour API (agents/specs/test-tour.md), base {@code /api/v1/tour}. It reads the project
  * with the read-only decoders, resolves the sources in the environment (private layers included),
  * redacts every secret before anything leaves the plugin, and never writes to the project. The
  * plugin keeps no tour: each run is identified only by the client's {@code runId} for cancel.

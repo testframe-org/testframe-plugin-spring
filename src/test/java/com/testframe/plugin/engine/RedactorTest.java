@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The forms one secret is matched in (docs/runner-protocol.md, "Security"): raw, JSON-escaped and
+ * The forms one secret is matched in (agents/specs/runner-protocol.md, "Security"): raw, JSON-escaped and
  * URL-encoded, longest first, with secrets shorter than {@link Redactor#MIN_SUBSTRING} characters
  * left out of the substring match. The structural rules (URI user-info, the four sensitive header
  * names) hold whatever the secret list is. What actually leaves the plugin is covered end to end
@@ -59,7 +59,7 @@ class RedactorTest {
 
     @Test
     void aShortPasswordIsStillRemovedFromAUri() {
-        // docs/runner-protocol.md: a short secret is "still removed where it sits structurally"
+        // agents/specs/runner-protocol.md: a short secret is "still removed where it sits structurally"
         assertEquals("mongodb://***@host/db", new Redactor(List.of("abc")).apply("mongodb://app:abc@host/db"));
     }
 

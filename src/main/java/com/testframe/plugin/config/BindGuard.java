@@ -8,7 +8,7 @@ import java.net.UnknownHostException;
 
 /**
  * Refuses to start bound to a non-loopback address without {@code testframe.token}
- * (docs/runner-protocol.md, "Security"): the plugin executes the calls it is asked to, so only
+ * (agents/specs/runner-protocol.md, "Security"): the plugin executes the calls it is asked to, so only
  * the loopback binding or the token keeps other machines from using it as a proxy.
  */
 @Component

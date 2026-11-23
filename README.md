@@ -65,8 +65,8 @@ resolves the sources itself; the tour's own state lives in the browser, never on
 
 These tables are an orientation, not the contract. Request and response shapes, error statuses,
 timeouts and the redaction rules are specified in
-[`docs/runner-protocol.md`](../../docs/runner-protocol.md) and
-[`docs/test-tour.md`](../../docs/test-tour.md).
+[`agents/specs/runner-protocol.md`](../../agents/specs/runner-protocol.md) and
+[`agents/specs/test-tour.md`](../../agents/specs/test-tour.md).
 
 ## Configuration
 
@@ -96,13 +96,13 @@ java -jar target/testframe-plugin-spring.jar run <projectDir> --env <env> \
 `.xml` writes JUnit (one `testsuite` per frame, one `testcase` per card). Nothing is written inside
 the project. Exit codes: `0` passed, `1` failed, `2` invalid invocation or project,
 `3` interrupted, `4` internal error — details in
-[`docs/test-tour.md`](../../docs/test-tour.md), "Headless CLI".
+[`agents/specs/test-tour.md`](../../agents/specs/test-tour.md), "Headless CLI".
 
 ## Where to read more
 
 | Document | Read it for |
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | This module's structure, golden rules, security and gotchas (Boot 4 / Jackson 3) |
-| [`docs/runner-protocol.md`](../../docs/runner-protocol.md) | The `/api/v1` contract: run shape, `CardResult.detail`, errors, timeouts, redaction |
-| [`docs/test-tour.md`](../../docs/test-tour.md) | Tour screens, the tour API, NDJSON events, the PDF report and the CLI |
-| [`modules/testframe-ide/docs/project-format.md`](../testframe-ide/docs/project-format.md) | The project format the read-only decoders implement |
+| [`agents/specs/runner-protocol.md`](../../agents/specs/runner-protocol.md) | The `/api/v1` contract: run shape, `CardResult.detail`, errors, timeouts, redaction |
+| [`agents/specs/test-tour.md`](../../agents/specs/test-tour.md) | Tour screens, the tour API, NDJSON events, the PDF report and the CLI |
+| [`agents/specs/project-format.md`](../../agents/specs/project-format.md) | The project format the read-only decoders implement |

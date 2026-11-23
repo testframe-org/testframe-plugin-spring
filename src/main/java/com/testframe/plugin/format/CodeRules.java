@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Code rules per (source type, subtype) (spec: docs/project-format.md, "Code rules"). The
+ * Code rules per (source type, subtype) (spec: agents/specs/project-format.md, "Code rules"). The
  * runner checks them before a card runs (a failing rule is that card's error). Empty code is a
  * draft and always acceptable; kinds without a rule accept anything.
  */

@@ -38,7 +38,7 @@ import java.util.function.Consumer;
 
 /**
  * Runs the frames of a project read from disk (the tour API and the headless CLI;
- * docs/test-tour.md): decodes the frame and the layered sources read-only, resolves the sources
+ * agents/specs/test-tour.md): decodes the frame and the layered sources read-only, resolves the sources
  * in the chosen environment (private layers included), fetches each openapi spec it needs once
  * per run in memory, applies the input overrides and runs the frame through the
  * {@link RunEngine}, emitting the run events. Nothing is written to the project.
@@ -127,7 +127,7 @@ public class ProjectRuns {
     }
 
     /**
-     * The frame's inputs (docs/test-tour.md, "Input cards"): rawvalue cards that are not the
+     * The frame's inputs (agents/specs/test-tour.md, "Input cards"): rawvalue cards that are not the
      * result card of an openapi or mongo card (walking backwards in the step, such a card is met
      * before any rawvalue card or the start of the step).
      */
@@ -259,7 +259,7 @@ public class ProjectRuns {
     // -------------------------------------------------------------------- run
 
     /**
-     * Runs a prepared frame, emitting the run events (docs/test-tour.md, "Run events") to
+     * Runs a prepared frame, emitting the run events (agents/specs/test-tour.md, "Run events") to
      * {@code sink} as raw maps: the caller redacts them ({@link Prepared#redactor()}) right before
      * they leave the plugin. {@code runId} is null for the CLI.
      */

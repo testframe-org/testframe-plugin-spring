@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * The body of a {@code jsonassert} card, by subtype (spec: docs/project-format.md):
+ * The body of a {@code jsonassert} card, by subtype (spec: agents/specs/project-format.md):
  * <ul>
  *   <li>{@code script}: one statement per line — {@code assert <expr> <op> <expr>} lines and/or
  *       plain expressions (the value of the last plain expression is the card's variable);</li>

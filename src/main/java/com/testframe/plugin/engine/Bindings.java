@@ -10,7 +10,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code {{varName.path}}} bindings between cards (docs/project-format.md, "Bindings"), resolved
+ * {@code {{varName.path}}} bindings between cards (agents/specs/project-format.md, "Bindings"), resolved
  * against the variables published so far. A string that is exactly one binding becomes the value
  * itself (keeping its JSON type); bindings inside longer text are replaced inline, non-string
  * values JSON-encoded. Paths that resolve to nothing keep the binding as written. Every resolved

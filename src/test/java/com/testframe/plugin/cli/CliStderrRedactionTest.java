@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Every line the CLI prints to stderr passes through the redactor (docs/runner-protocol.md,
- * "Security"; docs/test-tour.md, "Redaction"): the structural rules always, and the secrets of the
+ * Every line the CLI prints to stderr passes through the redactor (agents/specs/runner-protocol.md,
+ * "Security"; agents/specs/test-tour.md, "Redaction"): the structural rules always, and the secrets of the
  * environment's private layers once the sources resolve. Nothing here starts a server.
  */
 class CliStderrRedactionTest {

@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code GET /api/v1/health} (docs/runner-protocol.md): name, version, protocol and the
+ * {@code GET /api/v1/health} (agents/specs/runner-protocol.md): name, version, protocol and the
  * capabilities (the runnable (type, subtypes), the simulated types and the fixed limits). It
  * never carries configuration values.
  */

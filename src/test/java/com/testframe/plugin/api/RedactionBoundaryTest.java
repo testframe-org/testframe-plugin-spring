@@ -45,8 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The redaction acceptance test: a secret declared in a {@code sources.{env}.private.yaml} layer
  * and echoed back by an HTTP target appears in nothing that leaves the plugin — no response body,
- * no NDJSON stream event, no log line and no headless report (docs/runner-protocol.md, "Security";
- * docs/test-tour.md, "Redaction"). The project on disk, the target and the plugin are real; the
+ * no NDJSON stream event, no log line and no headless report (agents/specs/runner-protocol.md, "Security";
+ * agents/specs/test-tour.md, "Redaction"). The project on disk, the target and the plugin are real; the
  * target binds an ephemeral port and this test shuts it down and removes the project it wrote.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -264,7 +264,7 @@ class RedactionBoundaryTest {
 
     // ------------------------------------------------------------------- helpers
 
-    /** The self-contained run request of the same card (docs/runner-protocol.md, "Sources"). */
+    /** The self-contained run request of the same card (agents/specs/runner-protocol.md, "Sources"). */
     private static String runRequest() {
         return """
                 {

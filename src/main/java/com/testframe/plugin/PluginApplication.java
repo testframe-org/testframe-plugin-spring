@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
  * Entry point. {@code run <projectDir> --env <env> ...} is the headless CLI (no web server, no
- * Spring context; docs/test-tour.md, "Headless CLI") and {@code format-dump <projectDir>} prints
+ * Spring context; agents/specs/test-tour.md, "Headless CLI") and {@code format-dump <projectDir>} prints
  * the decoders' view of a project for the repo-root format parity gate; anything else starts the
  * HTTP plugin (runner protocol {@code /api/v1}, tour API {@code /api/v1/tour}).
  */

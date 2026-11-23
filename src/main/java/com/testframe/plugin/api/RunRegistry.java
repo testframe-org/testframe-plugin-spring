@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
-/** The runs in progress by their client-chosen {@code runId} (cancel, docs/test-tour.md). */
+/** The runs in progress by their client-chosen {@code runId} (cancel, agents/specs/test-tour.md). */
 @Component
 public class RunRegistry {
 

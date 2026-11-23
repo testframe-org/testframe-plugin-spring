@@ -31,7 +31,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The self-contained run endpoints (docs/runner-protocol.md): {@code /run} (one frame, JSON or
+ * The self-contained run endpoints (agents/specs/runner-protocol.md): {@code /run} (one frame, JSON or
  * NDJSON streaming), {@code /run/card} (one card with the editor's variables) and
  * {@code /assertions} (one jsonassert assertion). Every run is self-contained — the resolved
  * sources and the secrets arrive in the request, the plugin reads no project file and writes

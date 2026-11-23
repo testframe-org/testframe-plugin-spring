@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 
 /**
  * Read-only decoder of one frame directory ({@code frames/{frame}/step-{n}/{var-file}.md} plus
- * each step's {@code flow.md}; spec: docs/project-format.md, "Layout" and "Step sequence").
+ * each step's {@code flow.md}; spec: agents/specs/project-format.md, "Layout" and "Step sequence").
  * Steps are renumbered from 1 in numeric order, cards follow the step's {@code flow.md}; cards it
  * does not list are appended by file name and reported, entries without a card file are reported.
  * Invalid card files are kept (best effort) with their problems, so a run reports them as that

@@ -7,7 +7,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Read side of the envelope shared by every project file (docs/project-format.md):
+ * Read side of the envelope shared by every project file (agents/specs/project-format.md):
  * <pre>
  * -------------------
  * key: value
